@@ -1,0 +1,59 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-and-deploy:
+    environment: staging
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: "1.5.0"
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.GITHUB_ACTIONS_ROLE_ARN }} # Must be set in GitHub repository variables (IAM Role ARN)
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Terraform Init
+        run: terraform init
+        working-directory: ./ci-cd
+
+      - name: Terraform Apply
+        env:
+          AWS_REGION: ${{ vars.AWS_REGION }}
+        run: |
+          terraform apply -auto-approve -var='artifact_bucket_name=${{ vars.ARTIFACT_BUCKET_NAME }}' # ARTIFACT_BUCKET_NAME must match the Terraform variable "artifact_bucket_name"
+        working-directory: ./ci-cd
+
+      - name: Run Tests
+        run: |
+          echo "Running project tests..."
+          # Example test command; adjust to your project
+          if [ -f package.json ]; then npm install && npm test; elif [ -f pyproject.toml ]; then pip install -r requirements.txt && pytest; else echo "No test framework detected"; fi
+
+      - name: Build Artifact
+        run: |
+          echo "Packaging project files as artifact..."
+          mkdir -p build
+          # Simple zip of repository contents, adjust as needed
+          zip -r build/artifact.zip . -x "*.git*" "*.github*" "*node_modules*" "*venv*" "*__pycache__*"
+
+      - name: Deploy Artifact
+        if: success()
+        run: |
+          echo "Deploying artifact to S3..."
+          aws s3 cp build/artifact.zip s3://${{ vars.ARTIFACT_BUCKET_NAME }}/artifact.zip
