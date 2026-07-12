@@ -57,3 +57,18 @@ jobs:
         run: |
           echo "Deploying artifact to S3..."
           aws s3 cp build/artifact.zip s3://${{ vars.ARTIFACT_BUCKET_NAME }}/artifact.zip
+
+      - name: Publish failure log to CloudWatch
+        if: failure()
+        env:
+          AWS_REGION: ${{ vars.AWS_REGION }}
+        run: |
+          # Forward the failed job log to CloudWatch Logs so the metric_filter alarm fires.
+          mkdir -p logs
+          echo "job=build-and-deploy run_id=$GITHUB_RUN_ID status=failed ts=$(date -u +%FT%TZ)" > logs/build.err
+          echo "ERROR: CI/CD pipeline failed at build/deploy step" >> logs/build.err
+          aws logs create-log-stream --log-group-name /flyby/ci-cd --log-stream-name "gha-$GITHUB_RUN_ID" || true
+          aws logs put-log-events \
+            --log-group-name /flyby/ci-cd \
+            --log-stream-name "gha-$GITHUB_RUN_ID" \
+            --log-events file://logs/build.err
