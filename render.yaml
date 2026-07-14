@@ -1,0 +1,50 @@
+# Render Blueprint — Flyby MVP deployment.
+#
+# Replaces the AWS/Terraform CI/CD pipeline. Render auto-deploys this web
+# service from the `main` branch of https://github.com/Company/Flyby on
+# every push, so no AWS credentials or static secrets are required. The
+# PostgreSQL connection string is injected automatically by Render from
+# the database block below (see DATABASE_URL env var).
+#
+# Architecture decision context: https://github.com/Company/Flyby and TIR-179.
+# Frontend (apps/web, Vite PWA) deploys separately on Vercel from the
+# same repo and is intentionally not declared here.
+#
+# Free tier notes:
+#   - Web service: 750 instance-hours/month (covers a single instance 24/7).
+#   - PostgreSQL: 1 GB storage, sufficient for MVP airport/checkpoint data.
+# Redis is intentionally omitted for the MVP; SSE pub/sub uses an in-memory
+# Map inside the API process. Add a `redis` database block later when we
+# need cross-instance fan-out.
+
+services:
+  - type: web
+    name: flyby-api
+    runtime: node
+    plan: free
+    region: oregon
+    branch: main
+    rootDir: apps/api
+    autoDeploy: true
+    buildCommand: npm ci --omit=dev && npx prisma generate
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: DATABASE_URL
+        fromDatabase:
+          name: flyby-db
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+
+databases:
+  - name: flyby-db
+    databaseName: flyby
+    user: flyby
+    plan: free
+    postgresMajorVersion: "16"
+    ipAllowList: []
