@@ -1,0 +1,74 @@
+# Docker Compose — local development environment for Flyby.
+#
+# Mirrors the Render production setup (see render.yaml): PostgreSQL 16 +
+# a Node.js API built from apps/api. This eliminates the SQLite/PostgreSQL
+# dev-prod mismatch and gives every engineer an identical local stack.
+#
+# Usage:
+#   scripts/dev-up.sh        (Unix/macOS/WSL)
+#   scripts/dev-up.ps1       (Windows PowerShell)
+# Or manually:
+#   docker compose --env-file .env.docker up -d
+#   docker compose exec api npx prisma migrate deploy
+#
+# Notes:
+# - PostgreSQL data persists in the named volume `flyby_pgdata`.
+# - No Redis for the MVP: the API's SSE fan-out uses an in-process Map.
+#   Add a `redis` service here when cross-instance fan-out is needed.
+# - The `api` service shares .env.docker via env_file so DATABASE_URL,
+#   NODE_ENV, etc. resolve identically in container and host shell.
+#
+# Related tickets:
+# - TIR-187 — this local Docker Compose environment.
+# - TIR-179 — Render Blueprint (production counterpart).
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: flyby-postgres
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-flyby}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-flyby}
+      POSTGRES_DB: ${POSTGRES_DB:-flyby}
+    volumes:
+      - flyby_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-flyby} -d ${POSTGRES_DB:-flyby}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  api:
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile
+    container_name: flyby-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env.docker
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-flyby}:${POSTGRES_PASSWORD:-flyby}@postgres:5432/${POSTGRES_DB:-flyby}
+      NODE_ENV: development
+      PORT: "3000"
+    # Healthcheck uses `node` (always present in the API image) to probe
+    # /api/health — the same path Render uses (see render.yaml). If the app
+    # base image lacks wget/curl, this still works since node is guaranteed.
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://localhost:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+volumes:
+  flyby_pgdata:
+    name: flyby_pgdata

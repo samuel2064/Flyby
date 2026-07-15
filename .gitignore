@@ -8,3 +8,9 @@ override.tf.json
 *_override.tf
 *_override.tf.json
 terraform.rc
+
+# Docker local dev
+# .env.docker is safe to commit (dev defaults used by docker-compose.yml).
+# Ignore local-only overrides that may contain real secrets.
+.env.docker.local
+.env.local

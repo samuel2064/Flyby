@@ -1,0 +1,12 @@
+# Normalize line endings in the repo. core.autocrlf=true on Windows will
+# otherwise check out CRLF, which breaks shell scripts on Linux/macOS.
+* text=auto eol=lf
+
+# Force LF for scripts that must run on Unix shells / containers.
+*.sh   text eol=lf
+*.ps1  text eol=crlf
+
+# Binary assets (none currently, but document intent).
+*.png  binary
+*.jpg  binary
+*.ico  binary
