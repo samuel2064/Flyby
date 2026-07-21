@@ -1,0 +1,53 @@
+# Node modules
+node_modules
+npm-debug.log
+Dockerfile
+docker-compose.yml
+.dockerignore
+.git
+.gitignore
+.env
+.env.*
+.env.docker
+.env.docker.local
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+LICENSE
+README.md
+DEVELOPMENT.md
+RENDER_DEPLOY.md
+scripts/
+__tests__
+coverage/
+.nyc_output
+build/
+dist/
+docs/
+# Local env files
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+# Logs
+logs
+*.log
+# Runtime data
+pids
+*.pid
+*.seed
+# Coverage directory used by tools like istanbul
+coverage/*
+.nyc_output
+# Build system outputs
+*.csproj
+*.cs
+*.sln
+*.suo
+*.user
+*.usr
+*.ssopts
+# Misc
+.DS_Store
+Thumbs.db

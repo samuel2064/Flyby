@@ -15,8 +15,11 @@
 # - PostgreSQL data persists in the named volume `flyby_pgdata`.
 # - No Redis for the MVP: the API's SSE fan-out uses an in-process Map.
 #   Add a `redis` service here when cross-instance fan-out is needed.
-# - The `api` service shares .env.docker via env_file so DATABASE_URL,
-#   NODE_ENV, etc. resolve identically in container and host shell.
+# - The `api` service mounts the source code for live development:
+#   * Source code changes are reflected immediately
+#   * If you change dependencies in package.json, run `docker compose build api` to rebuild
+#   - The `api` service shares .env.docker via env_file so DATABASE_URL,
+#     NODE_ENV, etc. resolve identically in container and host shell.
 #
 # Related tickets:
 # - TIR-187 — this local Docker Compose environment.
@@ -46,6 +49,7 @@ services:
     build:
       context: ./apps/api
       dockerfile: Dockerfile
+      target: development  # Use development stage for local dev
     container_name: flyby-api
     restart: unless-stopped
     depends_on:
@@ -55,6 +59,8 @@ services:
       - "3000:3000"
     env_file:
       - .env.docker
+    volumes:
+      - ./apps/api:/app:cached
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-flyby}:${POSTGRES_PASSWORD:-flyby}@postgres:5432/${POSTGRES_DB:-flyby}
       NODE_ENV: development
