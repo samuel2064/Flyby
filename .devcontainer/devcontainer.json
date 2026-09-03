@@ -1,0 +1,42 @@
+// Dev container for GitHub Codespaces / VS Code Dev Containers.
+//
+// One-click setup for the full Flyby dev stack: this boots the existing
+// docker-compose.yml (PostgreSQL 16 + API) inside the Codespace, then
+// applies Prisma migrations automatically.
+//
+// Usage in GitHub: repo -> <> Code -> Codespaces -> Create codespace on main.
+// Docker Engine + Compose v2 are preinstalled in every Codespace, so this
+// replaces the blocked local Docker Desktop setup (TIR-187 chain).
+{
+  "name": "Flyby Dev (Postgres + API)",
+
+  // Reuse the production-mirrored compose stack instead of a standalone image.
+  "dockerComposeFile": "../docker-compose.yml",
+  "service": "api",
+  "workspaceFolder": "/app",
+
+  // Compose reads .env.docker via env_file; make sure relative paths resolve
+  // regardless of where the CLI is invoked from.
+  "remoteEnv": {
+    "COMPOSE_PROJECT_NAME": "flyby"
+  },
+
+  // Bring the stack fully up, wait for Postgres health, run migrations.
+  "updateContentCommand": "docker compose --env-file ../.env.docker up -d --build",
+  "postCreateCommand": "docker compose --env-file ../.env.docker exec -T api npx prisma migrate deploy || true",
+
+  // Forward the API and DB ports so they are reachable from the browser/host.
+  "forwardPorts": [3000, 5432],
+  "portsAttributes": {
+    "3000": { "label": "Flyby API", "onAutoForward": "notify" },
+    "5432": { "label": "PostgreSQL", "onAutoForward": "silent" }
+  },
+
+  "customizations": {
+    "vscode": {
+      "extensions": ["Prisma.prisma", "dbaeumer.vscode-eslint"]
+    }
+  },
+
+  "remoteUser": "nextjs"
+}
