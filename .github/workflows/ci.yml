@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  api-smoke-test:
+    name: API smoke test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/api
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund || npm install --no-audit --no-fund
+
+      - name: Syntax check
+        run: node --check server.js
+
+      - name: Start API and verify health
+        run: |
+          node server.js &
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:3000/api/health -o /tmp/health.json; then
+              cat /tmp/health.json
+              grep -q '"status":"ok"' /tmp/health.json && exit 0
+            fi
+            sleep 1
+          done
+          echo "API did not become healthy in time"
+          exit 1
+
+      - name: Verify mock endpoints
+        run: |
+          curl -sf "http://127.0.0.1:3000/api/wait-times?airport=SEA" | grep -q '"airport":"SEA"'
+          curl -sf http://127.0.0.1:3000/api/notifications/vapid-public-key | grep -q '"publicKey"'
+          echo "Mock endpoints OK"
+
+  docker-build:
+    name: Docker build validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build api service image
+        run: docker compose --env-file .env.docker build api
