@@ -14,3 +14,6 @@ terraform.rc
 # Ignore local-only overrides that may contain real secrets.
 .env.docker.local
 .env.local
+
+# Node dependencies
+node_modules/
