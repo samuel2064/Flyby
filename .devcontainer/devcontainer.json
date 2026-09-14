@@ -23,7 +23,7 @@
 
   // Bring the stack fully up, wait for Postgres health, run migrations.
   "updateContentCommand": "docker compose --env-file ../.env.docker up -d --build",
-  "postCreateCommand": "docker compose --env-file ../.env.docker exec -T api npx prisma migrate deploy || true",
+  "postCreateCommand": "docker compose --env-file ../.env.docker exec -T api sh -c 'for i in {1..30}; do node -e \"fetch(\\\"http://localhost:3000/api/health\\\").then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\" && break || sleep 2; done && npx prisma migrate deploy || true'",
 
   // Forward the API and DB ports so they are reachable from the browser/host.
   "forwardPorts": [3000, 5432],
