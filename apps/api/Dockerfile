@@ -20,6 +20,10 @@ COPY package*.json ./
 # Install all dependencies (including devDependencies for development)
 RUN npm ci
 
+# Copy Prisma schema and generate the client
+COPY prisma ./prisma
+RUN npx prisma generate
+
 # ---- Production dependencies stage (prod only) ----
 FROM base AS prod-deps
 
@@ -28,6 +32,10 @@ COPY package*.json ./
 
 # Install production dependencies only
 RUN npm ci --only=production
+
+# Copy Prisma schema and generate the client
+COPY prisma ./prisma
+RUN npx prisma generate
 
 # ---- Development stage ----
 FROM deps AS development

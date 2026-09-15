@@ -19,3 +19,43 @@ model User {
 
   @@index([email])
 }
+
+// Crowdsourced wait-time reports. Persisted so data survives restarts (TIR-281).
+model WaitTimeReport {
+  id          String   @id
+  airport     String
+  checkpoint  String
+  waitMinutes Int
+  reporter    String?
+  createdAt   DateTime @default(now())
+
+  @@index([airport])
+  @@index([createdAt])
+}
+
+// Push-notification subscriptions. Idempotent per endpoint+airportId (QA contract).
+model NotificationSubscription {
+  id          String   @id
+  endpoint    String
+  p256dh      String
+  auth        String
+  airportId   String
+  airportCode String
+  userId      String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([endpoint, airportId])
+  @@index([userId])
+}
+
+// Per-user notification preferences (QA contract: dnd/threshold/frequency fields).
+model UserPreference {
+  userId           String   @id
+  enabled          Boolean  @default(true)
+  dndStart         String
+  dndEnd           String
+  thresholdMinutes Int
+  frequency        String
+  updatedAt        DateTime @updatedAt
+}

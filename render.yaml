@@ -27,7 +27,7 @@ services:
     rootDir: apps/api
     autoDeploy: true
     buildCommand: npm ci --omit=dev && npx prisma generate
-    startCommand: npm start
+    startCommand: npx prisma migrate deploy && npm start
     healthCheckPath: /api/health
     envVars:
       - key: NODE_ENV

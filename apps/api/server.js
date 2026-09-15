@@ -16,8 +16,8 @@ app.use((req, res, next) => {
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
-  res.status(200).json({ 
-    status: 'ok', 
+  res.status(200).json({
+    status: 'ok',
     timestamp: new Date().toISOString(),
     service: 'flyby-api'
   });
@@ -25,7 +25,7 @@ app.get('/api/health', (req, res) => {
 
 // Basic root endpoint
 app.get('/', (req, res) => {
-  res.json({ 
+  res.json({
     message: 'Flyby API is running',
     version: '1.0.0',
     endpoints: ['/api/health']
@@ -33,8 +33,28 @@ app.get('/', (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// Mock backend for E2E happy-path tests (SSE, VAPID/push, wait times)
-// In-memory, no persistence - sufficient for QA test environment (TIR-269).
+// Prisma-backed persistence (TIR-281) with graceful in-memory fallback.
+//
+// When DATABASE_URL is set and the generated Prisma client initializes, all
+// wait-time reports, subscriptions, and per-user preferences persist in
+// PostgreSQL (flyby-db on Render; schema applied by `prisma migrate deploy`
+// in the deploy flow). Otherwise the API degrades to the previous in-memory
+// behavior so CI (no database) and local dev without a DB stay green.
+// ---------------------------------------------------------------------------
+
+let db = null;
+try {
+  if (process.env.DATABASE_URL) {
+    const { PrismaClient } = require('@prisma/client');
+    db = new PrismaClient();
+  }
+} catch (err) {
+  console.warn(`Prisma unavailable, using in-memory fallback: ${err.message}`);
+  db = null;
+}
+
+// ---------------------------------------------------------------------------
+// Mock/compatibility backend (SSE, VAPID/push, wait times, subscriptions)
 // ---------------------------------------------------------------------------
 
 const subscriptions = new Map();
@@ -81,22 +101,65 @@ app.get('/api/events', sseHandler);
 app.get('/api/wait-times/stream', sseHandler);
 app.get('/api/sse', sseHandler);
 
-// --- Wait times (sample data) ----------------------------------------------
+// --- Wait times (persisted when DB is available) ----------------------------
 
-app.get('/api/wait-times', (req, res) => {
+const baselineWaitTimes = (airport) => [
+  {
+    airport,
+    checkpoint: 'Main',
+    waitMinutes: 12,
+    updatedAt: new Date().toISOString(),
+  },
+];
+
+app.get('/api/wait-times', async (req, res) => {
   const airport = req.query.airport || 'SEA';
-  res.json([
-    {
-      airport,
-      checkpoint: 'Main',
-      waitMinutes: 12,
-      updatedAt: new Date().toISOString(),
-    },
-  ]);
+  try {
+    if (db) {
+      const where = req.query.airport ? { airport: String(req.query.airport) } : {};
+      const rows = await db.waitTimeReport.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        take: 100,
+      });
+      if (rows.length > 0) {
+        return res.json(
+          rows.map((r) => ({
+            airport: r.airport,
+            checkpoint: r.checkpoint,
+            waitMinutes: r.waitMinutes,
+            updatedAt: r.createdAt.toISOString(),
+          }))
+        );
+      }
+    }
+  } catch (err) {
+    console.warn(`GET /api/wait-times DB fallback: ${err.message}`);
+  }
+  res.json(baselineWaitTimes(airport));
 });
 
-app.post('/api/wait-times/report', (req, res) => {
-  res.status(201).json({ id: `rpt_${Date.now()}`, ...req.body, receivedAt: new Date().toISOString() });
+app.post('/api/wait-times/report', async (req, res) => {
+  const body = req.body || {};
+  const id = `rpt_${Date.now()}`;
+  const receivedAt = new Date().toISOString();
+  try {
+    if (db) {
+      const minutes = Number(body.waitMinutes);
+      await db.waitTimeReport.create({
+        data: {
+          id,
+          airport: String(body.airport || 'SEA'),
+          checkpoint: String(body.checkpoint || 'Main'),
+          waitMinutes: Number.isFinite(minutes) ? Math.round(minutes) : 0,
+          reporter: body.reporter || body.userId || null,
+        },
+      });
+    }
+  } catch (err) {
+    console.warn(`POST /api/wait-times/report DB fallback: ${err.message}`);
+  }
+  res.status(201).json({ id, ...body, receivedAt });
 });
 
 // --- VAPID / push notifications --------------------------------------------
@@ -126,7 +189,20 @@ function isValidUrl(s) {
   try { const u = new URL(s); return u.protocol === 'https:' || u.protocol === 'http:'; } catch { return false; }
 }
 
-const subscribeHandler = (req, res) => {
+// FLAT response contract: no secrets, ISO timestamps.
+function flatSubscription(record) {
+  return {
+    id: record.id,
+    endpoint: record.endpoint,
+    airportId: record.airportId,
+    airportCode: record.airportCode,
+    userId: record.userId,
+    createdAt: record.createdAt instanceof Date ? record.createdAt.toISOString() : record.createdAt,
+    updatedAt: record.updatedAt instanceof Date ? record.updatedAt.toISOString() : record.updatedAt,
+  };
+}
+
+const subscribeHandler = async (req, res) => {
   const body = req.body && req.body.subscription ? req.body.subscription : req.body || {};
   const { endpoint, p256dh, auth, airportId, userId } = body;
 
@@ -151,7 +227,45 @@ const subscribeHandler = (req, res) => {
 
   const effectiveUserId = userId || 'anonymous';
 
-  // Idempotent: same endpoint+airportId updates the existing record (no dupes, safe under concurrency)
+  if (db) {
+    try {
+      // Idempotent: same endpoint+airportId updates the existing record (no dupes)
+      const existing = await db.notificationSubscription.findUnique({
+        where: { endpoint_airportId: { endpoint, airportId } },
+      });
+      if (existing) {
+        const updated = await db.notificationSubscription.update({
+          where: { id: existing.id },
+          data: { p256dh, auth, userId: effectiveUserId },
+        });
+        return res.status(200).json(flatSubscription(updated));
+      }
+
+      // Per-user subscription limit
+      const userCount = await db.notificationSubscription.count({ where: { userId: effectiveUserId } });
+      if (effectiveUserId !== 'anonymous' && userCount >= MAX_SUBS_PER_USER) {
+        return res.status(429).json({ errors: [{ field: 'userId', message: 'Maximum subscriptions per user exceeded' }] });
+      }
+
+      // Timestamp suffix keeps the primary key unique across service restarts
+      const created = await db.notificationSubscription.create({
+        data: {
+          id: `sub_${subSeq++}_${Date.now()}`,
+          endpoint,
+          p256dh,
+          auth,
+          airportId,
+          airportCode,
+          userId: effectiveUserId,
+        },
+      });
+      return res.status(201).json(flatSubscription(created));
+    } catch (err) {
+      console.warn(`subscribe DB fallback: ${err.message}`);
+    }
+  }
+
+  // In-memory fallback (previous mock behavior)
   let record = Array.from(subscriptions.values()).find(
     (s) => s.endpoint === endpoint && s.airportId === airportId
   );
@@ -162,7 +276,6 @@ const subscribeHandler = (req, res) => {
     return res.status(200).json(flat);
   }
 
-  // Per-user subscription limit
   const userCount = Array.from(subscriptions.values()).filter((s) => s.userId === effectiveUserId).length;
   if (effectiveUserId !== 'anonymous' && userCount >= MAX_SUBS_PER_USER) {
     return res.status(429).json({ errors: [{ field: 'userId', message: 'Maximum subscriptions per user exceeded' }] });
@@ -184,7 +297,9 @@ const subscribeHandler = (req, res) => {
   res.status(201).json(flat);
 };
 
-// Seed records used by the QA contract (delete-403 and trigger happy paths)
+// Seed record used by the QA contract (delete-403 and trigger happy paths).
+// Kept in the in-memory Map for the fallback path; mirrored into the DB at
+// boot (idempotent upsert) so it also exists in the persistent store.
 subscriptions.set('sub-001', {
   id: 'sub-001',
   endpoint: 'https://fcm.googleapis.com/fcm/send/seed-sub-001',
@@ -197,6 +312,29 @@ subscriptions.set('sub-001', {
   updatedAt: new Date().toISOString(),
 });
 
+async function seedDatabase() {
+  if (!db) return;
+  try {
+    await db.notificationSubscription.upsert({
+      where: { id: 'sub-001' },
+      update: {},
+      create: {
+        id: 'sub-001',
+        endpoint: 'https://fcm.googleapis.com/fcm/send/seed-sub-001',
+        p256dh: 'BK_seed',
+        auth: 'auth_seed',
+        airportId: 'apt-jfk',
+        airportCode: 'JFK',
+        userId: 'user-owner-001',
+      },
+    });
+    console.log('Seed data ensured in database');
+  } catch (err) {
+    console.warn(`Seed skipped: ${err.message}`);
+  }
+}
+seedDatabase().catch(() => {});
+
 function findSubscription(id) {
   return subscriptions.get(id) || Array.from(subscriptions.values()).find((s) => s.endpoint === id);
 }
@@ -204,29 +342,56 @@ app.post('/api/notifications/subscribe', subscribeHandler);
 app.post('/api/push/subscribe', subscribeHandler);
 app.post('/api/subscriptions', subscribeHandler);
 
-// List subscriptions
-const listHandler = (req, res) => res.json({ subscriptions: Array.from(subscriptions.values()) });
+// List subscriptions (raw rows incl. p256dh/auth, matching previous contract)
+const listHandler = async (req, res) => {
+  if (db) {
+    try {
+      const rows = await db.notificationSubscription.findMany({
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      });
+      return res.json({ subscriptions: rows });
+    } catch (err) {
+      console.warn(`list DB fallback: ${err.message}`);
+    }
+  }
+  res.json({ subscriptions: Array.from(subscriptions.values()) });
+};
 app.get('/api/notifications/subscriptions', listHandler);
 app.get('/api/push/subscriptions', listHandler);
 app.get('/api/subscriptions', listHandler);
 
-// Per-user subscription list (QA spec): GET /api/notifications/:userId
-// Registered after preferences routes (see below) so it doesn't shadow them.
-// With ?page=&pageSize= pagination support.
-
 // Delete subscription by id (QA spec: DELETE /api/notifications/:subscriptionId)
-app.delete('/api/notifications/:id', (req, res) => {
-  const sub = findSubscription(req.params.id);
-  if (!sub) return res.status(404).json({ error: 'not_found', id: req.params.id });
+const deleteByIdHandler = async (req, res) => {
+  const id = req.params.id;
   const requester = req.get('X-User-Id');
-  if (requester && sub.userId && sub.userId !== 'anonymous' && requester !== sub.userId) {
+  const forbidden = (sub) =>
+    requester && sub.userId && sub.userId !== 'anonymous' && requester !== sub.userId;
+  if (db) {
+    try {
+      const sub =
+        (await db.notificationSubscription.findUnique({ where: { id } })) ||
+        (await db.notificationSubscription.findFirst({ where: { endpoint: id } }));
+      if (!sub) return res.status(404).json({ error: 'not_found', id });
+      if (forbidden(sub)) {
+        return res.status(403).json({ error: 'forbidden', message: 'Cannot delete another user\'s subscription' });
+      }
+      await db.notificationSubscription.delete({ where: { id: sub.id } });
+      return res.status(200).json({ success: true, id: sub.id });
+    } catch (err) {
+      console.warn(`delete DB fallback: ${err.message}`);
+    }
+  }
+  const sub = findSubscription(id);
+  if (!sub) return res.status(404).json({ error: 'not_found', id });
+  if (forbidden(sub)) {
     return res.status(403).json({ error: 'forbidden', message: 'Cannot delete another user\'s subscription' });
   }
   subscriptions.delete(sub.id);
   res.status(200).json({ success: true, id: sub.id });
-});
+};
+app.delete('/api/notifications/:id', deleteByIdHandler);
 
-// Delete subscription
+// Delete subscription (alias paths)
 const deleteHandler = (req, res) => {
   const id = req.params.id;
   subscriptions.delete(id);
@@ -236,7 +401,7 @@ app.delete('/api/notifications/subscriptions/:id', deleteHandler);
 app.delete('/api/push/subscriptions/:id', deleteHandler);
 app.delete('/api/subscriptions/:id', deleteHandler);
 
-// Preferences (get + update)
+// Preferences (get + update) - process-local, not persistence-critical
 const prefs = { enabled: true, airports: [], minWaitChange: 5 };
 const getPrefs = (req, res) => res.json(prefs);
 const setPrefs = (req, res) => {
@@ -263,16 +428,35 @@ function defaultPrefs(userId) {
     updatedAt: new Date().toISOString(),
   };
 }
-app.get('/api/notifications/preferences/:userId', (req, res) => {
+function prefsShape(row) {
+  return {
+    userId: row.userId,
+    dndStart: row.dndStart,
+    dndEnd: row.dndEnd,
+    thresholdMinutes: row.thresholdMinutes,
+    frequency: row.frequency,
+    enabled: row.enabled,
+    updatedAt: row.updatedAt instanceof Date ? row.updatedAt.toISOString() : row.updatedAt,
+  };
+}
+app.get('/api/notifications/preferences/:userId', async (req, res) => {
   if (UNKNOWN_USERS.has(req.params.userId)) {
     return res.status(404).json({ error: 'not_found', userId: req.params.userId });
+  }
+  if (db) {
+    try {
+      const row = await db.userPreference.findUnique({ where: { userId: req.params.userId } });
+      if (row) return res.json(prefsShape(row));
+    } catch (err) {
+      console.warn(`user prefs GET DB fallback: ${err.message}`);
+    }
   }
   const p = userPrefs.get(req.params.userId) || defaultPrefs(req.params.userId);
   res.json(p);
 });
 const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
 const FREQUENCIES = ['realtime', 'hourly', 'daily'];
-app.patch('/api/notifications/preferences/:userId', (req, res) => {
+app.patch('/api/notifications/preferences/:userId', async (req, res) => {
   if (UNKNOWN_USERS.has(req.params.userId)) {
     return res.status(404).json({ error: 'not_found', userId: req.params.userId });
   }
@@ -297,6 +481,34 @@ app.patch('/api/notifications/preferences/:userId', (req, res) => {
     errors.push({ field: 'frequency', message: `frequency must be one of: ${FREQUENCIES.join(', ')}` });
   }
   if (errors.length) return res.status(400).json({ errors });
+
+  if (db) {
+    try {
+      const defaults = defaultPrefs(req.params.userId);
+      const row = await db.userPreference.upsert({
+        where: { userId: req.params.userId },
+        update: {
+          ...(body.enabled !== undefined ? { enabled: body.enabled } : {}),
+          ...(body.dndStart !== undefined ? { dndStart: body.dndStart } : {}),
+          ...(body.dndEnd !== undefined ? { dndEnd: body.dndEnd } : {}),
+          ...(body.thresholdMinutes !== undefined ? { thresholdMinutes: body.thresholdMinutes } : {}),
+          ...(body.frequency !== undefined ? { frequency: body.frequency } : {}),
+        },
+        create: {
+          userId: req.params.userId,
+          enabled: body.enabled !== undefined ? body.enabled : defaults.enabled,
+          dndStart: body.dndStart !== undefined ? body.dndStart : defaults.dndStart,
+          dndEnd: body.dndEnd !== undefined ? body.dndEnd : defaults.dndEnd,
+          thresholdMinutes: body.thresholdMinutes !== undefined ? body.thresholdMinutes : defaults.thresholdMinutes,
+          frequency: body.frequency !== undefined ? body.frequency : defaults.frequency,
+        },
+      });
+      return res.json(prefsShape(row));
+    } catch (err) {
+      console.warn(`user prefs PATCH DB fallback: ${err.message}`);
+    }
+  }
+
   const cur = userPrefs.get(req.params.userId) || defaultPrefs(req.params.userId);
   Object.assign(cur, body, { updatedAt: new Date().toISOString() });
   userPrefs.set(req.params.userId, cur);
@@ -305,14 +517,29 @@ app.patch('/api/notifications/preferences/:userId', (req, res) => {
 
 // Per-user subscription list (QA spec): GET /api/notifications/:userId
 // Placed after /api/notifications/preferences/:userId so prefs routes win.
-app.get('/api/notifications/:userId', (req, res) => {
+app.get('/api/notifications/:userId', async (req, res) => {
   if (UNKNOWN_USERS.has(req.params.userId)) {
     return res.status(404).json({ error: 'not_found', userId: req.params.userId });
   }
-  const userSub = Array.from(subscriptions.values()).filter((s) => s.userId === req.params.userId);
   const page = parseInt(req.query.page || '1', 10);
   const pageSize = parseInt(req.query.pageSize || '50', 10);
   const start = (page - 1) * pageSize;
+  if (db) {
+    try {
+      const where = { userId: req.params.userId };
+      const total = await db.notificationSubscription.count({ where });
+      const rows = await db.notificationSubscription.findMany({
+        where,
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+        skip: start,
+        take: pageSize,
+      });
+      return res.json({ subscriptions: rows, total, page, pageSize });
+    } catch (err) {
+      console.warn(`user list DB fallback: ${err.message}`);
+    }
+  }
+  const userSub = Array.from(subscriptions.values()).filter((s) => s.userId === req.params.userId);
   const items = userSub.slice(start, start + pageSize);
   res.json({ subscriptions: items, total: userSub.length, page, pageSize });
 });
@@ -366,17 +593,28 @@ app.use('/api', (req, res) => {
   res.status(404).json({ error: 'not_found', path: req.originalUrl });
 });
 
+// Malformed JSON bodies: JSON 400, never HTML
+app.use((err, req, res, next) => {
+  if (err && (err.type === 'entity.parse.failed' || err instanceof SyntaxError)) {
+    return res.status(400).json({ error: 'bad_request', message: 'Malformed JSON body' });
+  }
+  next(err);
+});
+
 // Start the server
 const server = app.listen(port, '0.0.0.0', () => {
-  console.log(`Flyby API server running on port ${port}`);
+  console.log(`Flyby API server running on port ${port}${db ? ' (Prisma persistence)' : ' (in-memory mode)'}`);
 });
 
 // Graceful shutdown
 process.on('SIGTERM', () => {
   console.log('SIGTERM received, shutting down gracefully');
-  server.close(() => {
-    console.log('Process terminated');
-  });
+  const done = () => process.exit(0);
+  if (db) {
+    db.$disconnect().then(done).catch(done);
+  } else {
+    server.close(done);
+  }
 });
 
 module.exports = app;
