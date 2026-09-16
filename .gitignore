@@ -17,3 +17,6 @@ terraform.rc
 
 # Node dependencies
 node_modules/
+
+# Build output
+dist/

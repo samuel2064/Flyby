@@ -1,0 +1,17 @@
+﻿{
+  "name": "Flyby",
+  "short_name": "Flyby",
+  "description": "Live airport security checkpoint wait times, updated by travelers.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0f3a66",
+  "theme_color": "#0f3a66",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}
