@@ -2,6 +2,8 @@ const express = require('express');
 const app = express();
 const port = process.env.PORT || 3000;
 
+app.set('trust proxy', true);
+
 // Middleware to parse JSON
 app.use(express.json());
 
@@ -139,19 +141,64 @@ app.get('/api/wait-times', async (req, res) => {
   res.json(baselineWaitTimes(airport));
 });
 
+const REPORT_RATE_LIMIT_MS = 30000;
+const REPORT_RATE_LIMIT_MAX_ENTRIES = 1000;
+const reportRateLimits = new Map();
+
+function reportLimitKey(req, body) {
+  const identity = req.get('X-User-Id') || body.userId || body.reporter || null;
+  if (identity) return `user:${String(identity)}`;
+  return `ip:${req.ip || 'unknown'}`;
+}
+
 app.post('/api/wait-times/report', async (req, res) => {
   const body = req.body || {};
+  const waitMinutesValue =
+    body.waitMinutes !== undefined
+      ? body.waitMinutes
+      : body.waitTimeMinutes !== undefined
+        ? body.waitTimeMinutes
+        : body.minutes;
+
+  const errors = [];
+  if (typeof body.airport !== 'string' || body.airport.trim() === '') {
+    errors.push({ field: 'airport', message: 'airport must be a non-empty string' });
+  }
+  if (
+    typeof waitMinutesValue !== 'number' ||
+    !Number.isInteger(waitMinutesValue) ||
+    waitMinutesValue <= 0
+  ) {
+    errors.push({ field: 'waitMinutes', message: 'waitMinutes must be a positive integer' });
+  }
+  if (errors.length) return res.status(400).json({ errors });
+
+  const limitKey = reportLimitKey(req, body);
+  const now = Date.now();
+  if (reportRateLimits.size > REPORT_RATE_LIMIT_MAX_ENTRIES) {
+    for (const [key, ts] of reportRateLimits) {
+      if (now - ts >= REPORT_RATE_LIMIT_MS) reportRateLimits.delete(key);
+    }
+  }
+  const lastAcceptedAt = reportRateLimits.get(limitKey) || 0;
+  if (now - lastAcceptedAt < REPORT_RATE_LIMIT_MS) {
+    const retryAfterSec = Math.ceil((lastAcceptedAt + REPORT_RATE_LIMIT_MS - now) / 1000);
+    return res
+      .status(429)
+      .set('Retry-After', String(retryAfterSec))
+      .json({ errors: [{ field: 'rateLimit', message: `Too many reports; retry in ${retryAfterSec}s` }] });
+  }
+
   const id = `rpt_${Date.now()}`;
   const receivedAt = new Date().toISOString();
   try {
     if (db) {
-      const minutes = Number(body.waitMinutes);
       await db.waitTimeReport.create({
         data: {
           id,
-          airport: String(body.airport || 'SEA'),
+          airport: body.airport.trim(),
           checkpoint: String(body.checkpoint || 'Main'),
-          waitMinutes: Number.isFinite(minutes) ? Math.round(minutes) : 0,
+          waitMinutes: waitMinutesValue,
           reporter: body.reporter || body.userId || null,
         },
       });
@@ -159,7 +206,8 @@ app.post('/api/wait-times/report', async (req, res) => {
   } catch (err) {
     console.warn(`POST /api/wait-times/report DB fallback: ${err.message}`);
   }
-  res.status(201).json({ id, ...body, receivedAt });
+  reportRateLimits.set(limitKey, Date.now());
+  res.status(201).json({ id, ...body, waitMinutes: waitMinutesValue, receivedAt });
 });
 
 // --- VAPID / push notifications --------------------------------------------
