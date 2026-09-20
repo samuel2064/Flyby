@@ -636,6 +636,82 @@ app.post('/api/notifications/trigger', triggerHandler);
 app.post('/api/push/trigger', triggerHandler);
 app.post('/api/notifications/test', triggerHandler);
 
+// --- Airports + checkpoints reference data (TIR-287) ------------------------
+// Canonical list mirrors apps/web/src/data/airports.ts so the API and web
+// frontend describe the same supported airports.
+
+const AIRPORTS = [
+  { id: 'apt-jfk', code: 'JFK', name: 'John F. Kennedy International', city: 'New York' },
+  { id: 'apt-sea', code: 'SEA', name: 'Seattle-Tacoma International', city: 'Seattle' },
+  { id: 'apt-lax', code: 'LAX', name: 'Los Angeles International', city: 'Los Angeles' },
+  { id: 'apt-ord', code: 'ORD', name: "O'Hare International", city: 'Chicago' },
+  { id: 'apt-sfo', code: 'SFO', name: 'San Francisco International', city: 'San Francisco' },
+];
+
+const CHECKPOINTS_BY_AIRPORT = {
+  JFK: ['Main'],
+  SEA: ['Main'],
+  LAX: ['Main'],
+  ORD: ['Main'],
+  SFO: ['Main'],
+};
+
+app.get('/api/airports', (req, res) => {
+  const q = typeof req.query.q === 'string' ? req.query.q.trim().toLowerCase() : '';
+  const airports = q
+    ? AIRPORTS.filter(
+        (a) =>
+          a.code.toLowerCase().includes(q) ||
+          a.city.toLowerCase().includes(q) ||
+          a.name.toLowerCase().includes(q)
+      )
+    : AIRPORTS;
+  res.json({ airports });
+});
+
+app.get('/api/checkpoints', (req, res) => {
+  const query = typeof req.query.airport === 'string' ? req.query.airport.trim() : '';
+  if (query) {
+    const match = AIRPORTS.find((a) => a.code === query.toUpperCase() || a.id === query);
+    if (!match) {
+      return res
+        .status(404)
+        .json({ errors: [{ field: 'airport', message: `Airport not found: ${query}` }] });
+    }
+    return res.json({
+      airport: match.code,
+      checkpoints: (CHECKPOINTS_BY_AIRPORT[match.code] || []).map((name) => ({
+        airport: match.code,
+        name,
+      })),
+    });
+  }
+  res.json({
+    checkpoints: AIRPORTS.flatMap((a) =>
+      (CHECKPOINTS_BY_AIRPORT[a.code] || []).map((name) => ({ airport: a.code, name }))
+    ),
+  });
+});
+
+// --- Basic operational metrics (TIR-287) -------------------------------------
+
+const startedAt = new Date();
+app.get('/api/metrics', (req, res) => {
+  const mem = process.memoryUsage();
+  res.json({
+    service: 'flyby-api',
+    status: 'ok',
+    startedAt: startedAt.toISOString(),
+    uptimeSeconds: Math.floor((Date.now() - startedAt.getTime()) / 1000),
+    sseClients: sseClients.size,
+    memory: {
+      rssMB: Math.round(mem.rss / 1048576),
+      heapUsedMB: Math.round(mem.heapUsed / 1048576),
+    },
+    timestamp: new Date().toISOString(),
+  });
+});
+
 // Catch-all for unknown /api/* routes: return JSON 404 instead of HTML
 app.use('/api', (req, res) => {
   res.status(404).json({ error: 'not_found', path: req.originalUrl });
