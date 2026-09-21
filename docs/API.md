@@ -16,6 +16,7 @@ Malformed JSON bodies return `400 {"error":"bad_request"}`.
 | Method | Path           | Response                                                                                |
 | ------ | -------------- | --------------------------------------------------------------------------------------- |
 | GET    | `/api/airports` | `200 {"airports":[{id,code,name,city}]}` — optional `?q=` filters by code/city/name    |
+| GET    | `/api/airports/:code` | `200 {id,code,name,city}` — accepts either the code (`JFK`) or the id (`apt-jfk`); unknown airport `404 {"errors":[{field:"code",message}]}` |
 
 Supported airports: JFK, SEA, LAX, ORD, SFO (mirrors `apps/web/src/data/airports.ts`).
 
@@ -23,25 +24,25 @@ Supported airports: JFK, SEA, LAX, ORD, SFO (mirrors `apps/web/src/data/airports
 
 | Method | Path               | Response                                                                                     |
 | ------ | ------------------ | -------------------------------------------------------------------------------------------- |
-| GET    | `/api/checkpoints` | `200 {"checkpoints":[{airport,name}]}` — optional `?airport=<CODE\|apt-id>` filters         |
+| GET    | `/api/checkpoints` | `200 {"checkpoints":[{airport,name}]}` — optional `?airport=<CODE\|apt-id>` or `?airportId=<CODE\|apt-id>` filters |
 
-Unknown airport in `?airport=` returns `404 {"errors":[{field:"airport",message}]}`.
+Unknown airport in `?airport=`/`?airportId=` returns `404 {"errors":[{field:"airport",message}]}`.
 
 ## Wait times
 
 | Method | Path                    | Response                                                                                       |
 | ------ | ----------------------- | ---------------------------------------------------------------------------------------------- |
-| GET    | `/api/wait-times`       | `200 [{airport,checkpoint,waitMinutes,updatedAt}]` — optional `?airport=<CODE>`                |
-| POST   | `/api/wait-times/report`| `201 {id,...body,waitMinutes,receivedAt}`; body `{airport:string, waitMinutes:positive int}`. Validation errors: `400 {"errors":[...]}`. Rate limit: 30s per user/IP → `429` with `Retry-After` |
+| GET    | `/api/wait-times`       | `200 [{airport,checkpoint,waitMinutes,updatedAt}]` — optional `?airport=<CODE>` or `?airportId=<CODE\|apt-id>` |
+| POST   | `/api/wait-times`       | `201 {id,...body,waitMinutes,receivedAt}`; body `{airport:string, checkpoint?:string, waitMinutes:positive int}`. Validation errors: `400 {"errors":[...]}`. Rate limit: 30s per user/IP → `429` with `Retry-After`. Alias: `POST /api/wait-times/report` |
 
 ## Subscriptions (push notifications)
 
 | Method | Path                          | Response                                                                                          |
 | ------ | ----------------------------- | ------------------------------------------------------------------------------------------------- |
 | POST   | `/api/subscriptions`          | `200/201` flat subscription `{id,endpoint,airportId,airportCode,userId,createdAt,updatedAt}` (aliases: `/api/notifications/subscribe`, `/api/push/subscribe`). Required: endpoint,p256dh,auth,airportId → `400 {"errors":[...]}` |
-| GET    | `/api/subscriptions`          | `200 {"subscriptions":[...]}` (raw rows incl. p256dh/auth)                                        |
+| GET    | `/api/subscriptions`          | `200 {"subscriptions":[...]}` (flat rows, p256dh/auth redacted — push credentials are not publicly enumerable) |
 | DELETE | `/api/notifications/:id`      | `200 {"success":true,id}`; unknown id `404`; other user's subscription `403`                      |
-| GET    | `/api/notifications/:userId`  | `200 {subscriptions,total,page,pageSize}` (paginated, `?page=&pageSize=`)                         |
+| GET    | `/api/notifications/:userId`  | `200 {subscriptions,total,page,pageSize}` (paginated, `?page=&pageSize=`, p256dh/auth redacted)   |
 
 Per-user limit: 10 subscriptions (non-anonymous).
 

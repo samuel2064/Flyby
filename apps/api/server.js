@@ -115,10 +115,12 @@ const baselineWaitTimes = (airport) => [
 ];
 
 app.get('/api/wait-times', async (req, res) => {
-  const airport = req.query.airport || 'SEA';
+  const rawAirport = req.query.airport || req.query.airportId || null;
+  // `airportId` accepts either the airport code (JFK) or the airport id (apt-jfk)
+  const airport = rawAirport ? String(AIRPORT_CODES[rawAirport] || rawAirport) : 'SEA';
   try {
     if (db) {
-      const where = req.query.airport ? { airport: String(req.query.airport) } : {};
+      const where = rawAirport ? { airport } : {};
       const rows = await db.waitTimeReport.findMany({
         where,
         orderBy: { createdAt: 'desc' },
@@ -151,7 +153,7 @@ function reportLimitKey(req, body) {
   return `ip:${req.ip || 'unknown'}`;
 }
 
-app.post('/api/wait-times/report', async (req, res) => {
+const reportHandler = async (req, res) => {
   const body = req.body || {};
   const waitMinutesValue =
     body.waitMinutes !== undefined
@@ -208,7 +210,12 @@ app.post('/api/wait-times/report', async (req, res) => {
   }
   reportRateLimits.set(limitKey, Date.now());
   res.status(201).json({ id, ...body, waitMinutes: waitMinutesValue, receivedAt });
-});
+};
+
+// Report submission: canonical path is POST /api/wait-times; /report is kept
+// as a frontend-compatible alias.
+app.post('/api/wait-times', reportHandler);
+app.post('/api/wait-times/report', reportHandler);
 
 // --- VAPID / push notifications --------------------------------------------
 
@@ -390,19 +397,22 @@ app.post('/api/notifications/subscribe', subscribeHandler);
 app.post('/api/push/subscribe', subscribeHandler);
 app.post('/api/subscriptions', subscribeHandler);
 
-// List subscriptions (raw rows incl. p256dh/auth, matching previous contract)
+// List subscriptions (TIR-294: p256dh/auth are push credentials and must not
+// be publicly enumerable - redacted on all list responses)
 const listHandler = async (req, res) => {
   if (db) {
     try {
       const rows = await db.notificationSubscription.findMany({
         orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
       });
-      return res.json({ subscriptions: rows });
+      return res.json({ subscriptions: rows.map(flatSubscription) });
     } catch (err) {
       console.warn(`list DB fallback: ${err.message}`);
     }
   }
-  res.json({ subscriptions: Array.from(subscriptions.values()) });
+  res.json({
+    subscriptions: Array.from(subscriptions.values()).map(({ p256dh, auth, ...flat }) => flat),
+  });
 };
 app.get('/api/notifications/subscriptions', listHandler);
 app.get('/api/push/subscriptions', listHandler);
@@ -582,13 +592,15 @@ app.get('/api/notifications/:userId', async (req, res) => {
         skip: start,
         take: pageSize,
       });
-      return res.json({ subscriptions: rows, total, page, pageSize });
+      return res.json({ subscriptions: rows.map(flatSubscription), total, page, pageSize });
     } catch (err) {
       console.warn(`user list DB fallback: ${err.message}`);
     }
   }
   const userSub = Array.from(subscriptions.values()).filter((s) => s.userId === req.params.userId);
-  const items = userSub.slice(start, start + pageSize);
+  const items = userSub
+    .slice(start, start + pageSize)
+    .map(({ p256dh, auth, ...flat }) => flat);
   res.json({ subscriptions: items, total: userSub.length, page, pageSize });
 });
 
@@ -656,6 +668,34 @@ const CHECKPOINTS_BY_AIRPORT = {
   SFO: ['Main'],
 };
 
+// --- Production data hygiene (TIR-294) --------------------------------------
+// QA/test residue must never be visible in production: reports for airports
+// outside the canonical list (e.g. QALOCAL/QATEST/"123") and reports posted by
+// automated test suites (checkpoint names like TIR283-*, TIR292-Verify).
+// Purged idempotently at boot; real reports on production airports with real
+// checkpoint names are never touched.
+async function purgeTestResidue() {
+  if (!db) return;
+  try {
+    const stale = await db.waitTimeReport.findMany({
+      where: {
+        OR: [
+          { airport: { notIn: AIRPORTS.map((a) => a.code) } },
+          { checkpoint: { startsWith: 'TIR' } },
+        ],
+      },
+      select: { id: true },
+    });
+    if (stale.length > 0) {
+      await db.waitTimeReport.deleteMany({ where: { id: { in: stale.map((r) => r.id) } } });
+      console.log(`Purged ${stale.length} test-residue wait-time reports (TIR-294 hygiene)`);
+    }
+  } catch (err) {
+    console.warn(`Test-residue purge skipped: ${err.message}`);
+  }
+}
+purgeTestResidue().catch(() => {});
+
 app.get('/api/airports', (req, res) => {
   const q = typeof req.query.q === 'string' ? req.query.q.trim().toLowerCase() : '';
   const airports = q
@@ -669,8 +709,26 @@ app.get('/api/airports', (req, res) => {
   res.json({ airports });
 });
 
+app.get('/api/airports/:code', (req, res) => {
+  const raw = typeof req.params.code === 'string' ? req.params.code.trim() : '';
+  const match = AIRPORTS.find((a) => a.code === raw.toUpperCase() || a.id === raw);
+  if (!match) {
+    return res
+      .status(404)
+      .json({ errors: [{ field: 'code', message: `Airport not found: ${raw}` }] });
+  }
+  return res.json(match);
+});
+
 app.get('/api/checkpoints', (req, res) => {
-  const query = typeof req.query.airport === 'string' ? req.query.airport.trim() : '';
+  // Accept both ?airport=<CODE|apt-id> and ?airportId=<CODE|apt-id>
+  const airportParam =
+    typeof req.query.airport === 'string'
+      ? req.query.airport
+      : typeof req.query.airportId === 'string'
+        ? req.query.airportId
+        : '';
+  const query = airportParam.trim();
   if (query) {
     const match = AIRPORTS.find((a) => a.code === query.toUpperCase() || a.id === query);
     if (!match) {
