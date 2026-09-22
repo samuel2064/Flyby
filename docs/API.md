@@ -32,7 +32,7 @@ Unknown airport in `?airport=`/`?airportId=` returns `404 {"errors":[{field:"air
 
 | Method | Path                    | Response                                                                                       |
 | ------ | ----------------------- | ---------------------------------------------------------------------------------------------- |
-| GET    | `/api/wait-times`       | `200 [{airport,checkpoint,waitMinutes,updatedAt}]` — optional `?airport=<CODE>` or `?airportId=<CODE\|apt-id>` |
+| GET    | `/api/wait-times`       | `200 [{airport,checkpoint,waitMinutes,updatedAt}]` — optional `?airport=<CODE\|apt-id>` or `?airportId=<CODE\|apt-id>` (case-insensitive). Known airports with no reports return `200 []`. Unknown airports return `404 {"error":"Airport not found"}`. Records are never fabricated (TIR-298). |
 | POST   | `/api/wait-times`       | `201 {id,...body,waitMinutes,receivedAt}`; body `{airport:string, checkpoint?:string, waitMinutes:positive int}`. Validation errors: `400 {"errors":[...]}`. Rate limit: 30s per user/IP → `429` with `Retry-After`. Alias: `POST /api/wait-times/report` |
 
 ## Subscriptions (push notifications)

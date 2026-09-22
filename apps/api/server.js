@@ -104,20 +104,20 @@ app.get('/api/wait-times/stream', sseHandler);
 app.get('/api/sse', sseHandler);
 
 // --- Wait times (persisted when DB is available) ----------------------------
-
-const baselineWaitTimes = (airport) => [
-  {
-    airport,
-    checkpoint: 'Main',
-    waitMinutes: 12,
-    updatedAt: new Date().toISOString(),
-  },
-];
+// TIR-298: GET never fabricates wait-time records. Unknown airports return 404
+// (consistent with /api/airports/:code and /api/checkpoints); known airports
+// with no persisted reports return an empty list - never a synthesized record
+// with a misleading `updatedAt: now`.
 
 app.get('/api/wait-times', async (req, res) => {
   const rawAirport = req.query.airport || req.query.airportId || null;
   // `airportId` accepts either the airport code (JFK) or the airport id (apt-jfk)
-  const airport = rawAirport ? String(AIRPORT_CODES[rawAirport] || rawAirport) : 'SEA';
+  const airport = rawAirport
+    ? String(AIRPORT_CODES[rawAirport] || rawAirport).trim().toUpperCase()
+    : null;
+  if (rawAirport && !AIRPORTS.some((a) => a.code === airport)) {
+    return res.status(404).json({ error: 'Airport not found' });
+  }
   try {
     if (db) {
       const where = rawAirport ? { airport } : {};
@@ -126,21 +126,19 @@ app.get('/api/wait-times', async (req, res) => {
         orderBy: { createdAt: 'desc' },
         take: 100,
       });
-      if (rows.length > 0) {
-        return res.json(
-          rows.map((r) => ({
-            airport: r.airport,
-            checkpoint: r.checkpoint,
-            waitMinutes: r.waitMinutes,
-            updatedAt: r.createdAt.toISOString(),
-          }))
-        );
-      }
+      return res.json(
+        rows.map((r) => ({
+          airport: r.airport,
+          checkpoint: r.checkpoint,
+          waitMinutes: r.waitMinutes,
+          updatedAt: r.createdAt.toISOString(),
+        }))
+      );
     }
   } catch (err) {
-    console.warn(`GET /api/wait-times DB fallback: ${err.message}`);
+    console.warn(`GET /api/wait-times DB read failed: ${err.message}`);
   }
-  res.json(baselineWaitTimes(airport));
+  res.json([]);
 });
 
 const REPORT_RATE_LIMIT_MS = 30000;
@@ -800,3 +798,5 @@ process.on('SIGTERM', () => {
 });
 
 module.exports = app;
+// Exposed for the test suite: lets `node --test` close the listener cleanly.
+module.exports.httpServer = server;

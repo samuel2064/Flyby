@@ -41,4 +41,14 @@ jobs:
           probe "/api/airports/JFK" '"code":"JFK"'
           probe "/api/checkpoints?airport=JFK" '"checkpoints"'
 
+          # TIR-298 live guard: unknown airports must return app-level 404,
+          # never a fabricated wait-time record.
+          code=$(curl -s -o /tmp/wt_unknown.json -w '%{http_code}' --max-time 90 "$BASE_URL/api/wait-times?airport=YYY" || echo 000)
+          if [ "$code" != "404" ]; then
+            echo "Response body:"
+            head -c 500 /tmp/wt_unknown.json || true
+            fail "Unknown airport wait-times returned HTTP $code (expected 404) - TIR-298 regression"
+          fi
+          echo "OK    /api/wait-times?airport=YYY -> 404 (TIR-298 contract)"
+
           echo "All live smoke checks passed"

@@ -26,6 +26,9 @@ jobs:
       - name: Syntax check
         run: node --check server.js
 
+      - name: Run API tests
+        run: npm test
+
       - name: Start API and verify health
         run: |
           node server.js &
@@ -41,7 +44,16 @@ jobs:
 
       - name: Verify mock endpoints
         run: |
-          curl -sf "http://127.0.0.1:3000/api/wait-times?airport=SEA" | grep -q '"airport":"SEA"'
+          # TIR-298: unknown airports must 404, never fabricate wait-time records
+          code=$(curl -s -o /tmp/wt_unknown.json -w '%{http_code}' "http://127.0.0.1:3000/api/wait-times?airport=YYY")
+          if [ "$code" != "404" ]; then
+            echo "Expected 404 for unknown airport, got $code"
+            cat /tmp/wt_unknown.json
+            exit 1
+          fi
+          grep -q '"Airport not found"' /tmp/wt_unknown.json
+          # Known airports still respond 200 (report data only, possibly empty)
+          curl -sf "http://127.0.0.1:3000/api/wait-times?airport=SEA" -o /tmp/wt_sea.json
           curl -sf http://127.0.0.1:3000/api/notifications/vapid-public-key | grep -q '"publicKey"'
           echo "Mock endpoints OK"
 
