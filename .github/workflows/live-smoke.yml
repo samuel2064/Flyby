@@ -1,0 +1,44 @@
+name: Live API smoke check
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+env:
+  BASE_URL: https://flyby-api.onrender.com
+
+jobs:
+  live-smoke:
+    name: Live smoke
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probe /api/health and product routes (retries tolerate Render cold starts)
+        run: |
+          set -uo pipefail
+          fail() { echo "::error::$1"; exit 1; }
+
+          probe() {
+            local path="$1" grep_pattern="$2"
+            local attempt=1 code=000
+            while [ $attempt -le 3 ]; do
+              code=$(curl -s -o /tmp/body.json -w '%{http_code}' --max-time 90 "$BASE_URL$path" || echo 000)
+              if [ "$code" = "200" ] && grep -q "$grep_pattern" /tmp/body.json; then
+                echo "OK    $path -> 200 (attempt $attempt)"
+                return 0
+              fi
+              echo "RETRY $path -> HTTP $code (attempt $attempt)"
+              attempt=$((attempt+1))
+              sleep 45
+            done
+            echo "Response body on final failure:"
+            head -c 500 /tmp/body.json || true
+            fail "Live smoke check FAILED for $path after 3 attempts (last HTTP $code) - possible Render bad/partial deploy (TIR-301 failure mode)"
+          }
+
+          probe "/api/health" '"status":"ok"'
+          probe "/api/airports" '"airports"'
+          probe "/api/airports/JFK" '"code":"JFK"'
+          probe "/api/checkpoints?airport=JFK" '"checkpoints"'
+
+          echo "All live smoke checks passed"
