@@ -77,3 +77,91 @@ test('health endpoint still responds ok (boot sanity)', async () => {
   const body = await res.json();
   assert.equal(body.status, 'ok');
 });
+
+// --- TIR-299: authenticated DELETE /api/reports/:id ---------------------------
+// In-memory mode (no DB): reports are never persisted, so an authenticated
+// delete of a well-formed id answers 404 "Report not found" - distinct from the
+// catch-all 404 {"error":"not_found","path":...} that a missing route returns.
+
+const ADMIN_KEY = 'test-admin-key-0123456789abcdef';
+
+test('DELETE /api/reports/:id without a key returns 401 (route exists, not catch-all)', async () => {
+  await ready;
+  process.env.ADMIN_API_KEY = ADMIN_KEY;
+  const res = await fetch(`${BASE}/api/reports/rpt_1234567890`, { method: 'DELETE' });
+  assert.equal(res.status, 401);
+  assert.deepEqual(await res.json(), { error: 'Invalid or missing admin key' });
+});
+
+test('DELETE /api/reports/:id with a wrong key returns 401', async () => {
+  await ready;
+  process.env.ADMIN_API_KEY = ADMIN_KEY;
+  const res = await fetch(`${BASE}/api/reports/rpt_1234567890`, {
+    method: 'DELETE',
+    headers: { 'X-Admin-Key': 'not-the-admin-key' },
+  });
+  assert.equal(res.status, 401);
+  assert.deepEqual(await res.json(), { error: 'Invalid or missing admin key' });
+});
+
+test('DELETE /api/reports/:id accepts Authorization: Bearer auth', async () => {
+  await ready;
+  process.env.ADMIN_API_KEY = ADMIN_KEY;
+  const res = await fetch(`${BASE}/api/reports/rpt_1234567890`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${ADMIN_KEY}` },
+  });
+  // 404 "Report not found": authenticated, in-memory mode has no persisted rows
+  assert.equal(res.status, 404);
+  assert.deepEqual(await res.json(), { error: 'Report not found' });
+});
+
+test('authenticated DELETE with X-Admin-Key and unknown id returns 404 Report not found', async () => {
+  await ready;
+  process.env.ADMIN_API_KEY = ADMIN_KEY;
+  const res = await fetch(`${BASE}/api/reports/rpt_1234567890`, {
+    method: 'DELETE',
+    headers: { 'X-Admin-Key': ADMIN_KEY },
+  });
+  assert.equal(res.status, 404);
+  assert.deepEqual(await res.json(), { error: 'Report not found' });
+});
+
+test('authenticated DELETE with an invalid id format returns 400', async () => {
+  await ready;
+  process.env.ADMIN_API_KEY = ADMIN_KEY;
+  const res = await fetch(`${BASE}/api/reports/bad%20id%21`, {
+    method: 'DELETE',
+    headers: { 'X-Admin-Key': ADMIN_KEY },
+  });
+  assert.equal(res.status, 400);
+  assert.deepEqual(await res.json(), { error: 'Invalid report id' });
+});
+
+test('authenticated DELETE with an oversized id returns 400', async () => {
+  await ready;
+  process.env.ADMIN_API_KEY = ADMIN_KEY;
+  const longId = 'a'.repeat(65);
+  const res = await fetch(`${BASE}/api/reports/${longId}`, {
+    method: 'DELETE',
+    headers: { 'X-Admin-Key': ADMIN_KEY },
+  });
+  assert.equal(res.status, 400);
+  assert.deepEqual(await res.json(), { error: 'Invalid report id' });
+});
+
+test('DELETE /api/reports/:id is fail-closed (503) when ADMIN_API_KEY is unset', async () => {
+  await ready;
+  delete process.env.ADMIN_API_KEY;
+  try {
+    const res = await fetch(`${BASE}/api/reports/rpt_1234567890`, {
+      method: 'DELETE',
+      headers: { 'X-Admin-Key': 'anything' },
+    });
+    assert.equal(res.status, 503);
+    const body = await res.json();
+    assert.equal(body.error, 'Report deletion is disabled: ADMIN_API_KEY is not configured');
+  } finally {
+    process.env.ADMIN_API_KEY = ADMIN_KEY;
+  }
+});

@@ -35,6 +35,17 @@ Unknown airport in `?airport=`/`?airportId=` returns `404 {"errors":[{field:"air
 | GET    | `/api/wait-times`       | `200 [{airport,checkpoint,waitMinutes,updatedAt}]` — optional `?airport=<CODE\|apt-id>` or `?airportId=<CODE\|apt-id>` (case-insensitive). Known airports with no reports return `200 []`. Unknown airports return `404 {"error":"Airport not found"}`. Records are never fabricated (TIR-298). |
 | POST   | `/api/wait-times`       | `201 {id,...body,waitMinutes,receivedAt}`; body `{airport:string, checkpoint?:string, waitMinutes:positive int}`. Validation errors: `400 {"errors":[...]}`. Rate limit: 30s per user/IP → `429` with `Retry-After`. Alias: `POST /api/wait-times/report` |
 
+## Reports (admin)
+
+| Method | Path                   | Response                                                                                                                                    |
+| ------ | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| DELETE | `/api/reports/:id`     | `204` on success. Auth required: `X-Admin-Key: <ADMIN_API_KEY>` or `Authorization: Bearer <ADMIN_API_KEY>`. Missing/wrong key → `401 {"error":"Invalid or missing admin key"}`. Invalid id format → `400 {"error":"Invalid report id"}`. Unknown id → `404 {"error":"Report not found"}`. If `ADMIN_API_KEY` is not configured server-side → `503` (deletion disabled, fail-closed). |
+
+Intended for QA/test-record cleanup in production. Every successful deletion emits a
+single-line JSON audit log (`event: "report_deleted"` with reportId, airport, checkpoint,
+waitMinutes, reporter, reportedAt, ip) visible in the Render log drain. Deletion is a hard
+delete; ids are the `rpt_<epoch-ms>` values returned by `POST /api/wait-times`.
+
 ## Subscriptions (push notifications)
 
 | Method | Path                          | Response                                                                                          |

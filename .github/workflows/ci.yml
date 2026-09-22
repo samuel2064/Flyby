@@ -55,7 +55,53 @@ jobs:
           # Known airports still respond 200 (report data only, possibly empty)
           curl -sf "http://127.0.0.1:3000/api/wait-times?airport=SEA" -o /tmp/wt_sea.json
           curl -sf http://127.0.0.1:3000/api/notifications/vapid-public-key | grep -q '"publicKey"'
+          # TIR-299: admin delete route must exist and be fail-closed. This boot
+          # has no ADMIN_API_KEY, so DELETE must answer 503 (never 404 catch-all).
+          code=$(curl -s -o /tmp/del_unauth.json -w '%{http_code}' -X DELETE "http://127.0.0.1:3000/api/reports/rpt_123")
+          if [ "$code" != "503" ]; then
+            echo "Expected 503 for DELETE without ADMIN_API_KEY, got $code"
+            cat /tmp/del_unauth.json
+            exit 1
+          fi
+          grep -q 'ADMIN_API_KEY' /tmp/del_unauth.json
           echo "Mock endpoints OK"
+
+      - name: Verify admin delete contract with a key configured (TIR-299)
+        run: |
+          ADMIN_API_KEY=ci-admin-key PORT=3788 node server.js &
+          SERVER2_PID=$!
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:3788/api/health >/dev/null && break
+            sleep 1
+          done
+          # Unauthenticated DELETE -> 401
+          code=$(curl -s -o /tmp/del1.json -w '%{http_code}' -X DELETE "http://127.0.0.1:3788/api/reports/rpt_123")
+          if [ "$code" != "401" ]; then
+            echo "Expected 401 for unauthenticated DELETE, got $code"
+            cat /tmp/del1.json
+            kill $SERVER2_PID 2>/dev/null || true
+            exit 1
+          fi
+          grep -q 'admin key' /tmp/del1.json
+          # Authenticated DELETE of an unknown id -> 404 Report not found
+          code=$(curl -s -o /tmp/del2.json -w '%{http_code}' -X DELETE -H "X-Admin-Key: ci-admin-key" "http://127.0.0.1:3788/api/reports/rpt_123")
+          if [ "$code" != "404" ]; then
+            echo "Expected 404 for authenticated DELETE of unknown id, got $code"
+            cat /tmp/del2.json
+            kill $SERVER2_PID 2>/dev/null || true
+            exit 1
+          fi
+          grep -q '"Report not found"' /tmp/del2.json
+          # Invalid id format -> 400
+          code=$(curl -s -o /tmp/del3.json -w '%{http_code}' -X DELETE -H "X-Admin-Key: ci-admin-key" "http://127.0.0.1:3788/api/reports/bad%20id%21")
+          if [ "$code" != "400" ]; then
+            echo "Expected 400 for invalid report id, got $code"
+            cat /tmp/del3.json
+            kill $SERVER2_PID 2>/dev/null || true
+            exit 1
+          fi
+          kill $SERVER2_PID 2>/dev/null || true
+          echo "Admin delete contract OK"
 
   docker-build:
     name: Docker build validation

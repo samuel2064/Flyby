@@ -27,6 +27,20 @@ This document captures the **board/manual steps** required to go live on Render 
 5. Leave `JWT_SECRET` as **generated** (Render creates it). No manual secrets to fill for the MVP.
 6. Click **Apply**. Render provisions the PostgreSQL database first, then builds + deploys the API.
 
+### Optional post-setup: enable admin report deletion (TIR-299)
+
+`DELETE /api/reports/:id` (QA test-record cleanup) ships **fail-closed**: while
+`ADMIN_API_KEY` is unset the endpoint answers `503` and deletes nothing. To enable it:
+
+1. Generate a key: `openssl rand -hex 32`.
+2. Render Dashboard → `flyby-api` → **Environment** → **Add Environment Variable**:
+   key `ADMIN_API_KEY`, value = the generated key.
+3. Render restarts the service automatically. Verify: an unauthenticated
+   `DELETE https://flyby-api.onrender.com/api/reports/rpt_0` must answer `401`
+   (previously `503`). Authenticated deletion then returns `404` (unknown id) or `204` (deleted).
+
+Keep this key out of the repo — set it only in the Render dashboard.
+
 ## 3. Migrations (devops)
 
 Once the service is live, run Prisma migrations against the Render PostgreSQL. Options:

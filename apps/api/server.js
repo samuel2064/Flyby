@@ -1,4 +1,5 @@
 const express = require('express');
+const crypto = require('crypto');
 const app = express();
 const port = process.env.PORT || 3000;
 
@@ -11,7 +12,7 @@ app.use(express.json());
 app.use((req, res, next) => {
   res.set('Access-Control-Allow-Origin', '*');
   res.set('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
-  res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Admin-Key');
   if (req.method === 'OPTIONS') return res.sendStatus(204);
   next();
 });
@@ -214,6 +215,102 @@ const reportHandler = async (req, res) => {
 // as a frontend-compatible alias.
 app.post('/api/wait-times', reportHandler);
 app.post('/api/wait-times/report', reportHandler);
+
+// --- Admin report deletion (TIR-299) -----------------------------------------
+// DELETE /api/reports/:id removes a persisted wait-time report. Intended for
+// QA test-record cleanup in production. Destructive on a public crowdsourced
+// product, so: admin-only, fail-closed, audited.
+//
+// Auth: X-Admin-Key: <ADMIN_API_KEY> (or Authorization: Bearer <ADMIN_API_KEY>).
+// If ADMIN_API_KEY is not configured, the endpoint is disabled (503) - never
+// an open unauthenticated delete.
+//
+// Responses:
+//   503 - ADMIN_API_KEY not configured (deletion disabled)
+//   401 - missing or incorrect admin key
+//   400 - invalid report id format
+//   404 - well-formed id that does not exist (repeat deletes included)
+//   204 - deleted
+
+function configuredAdminKey() {
+  const key = process.env.ADMIN_API_KEY;
+  return typeof key === 'string' && key.length > 0 ? key : null;
+}
+
+// Constant-time compare over sha256 digests so the key length cannot leak
+// through timingSafeEqual's throw-on-length-mismatch behavior.
+function adminKeyMatches(provided, expected) {
+  const providedHash = crypto.createHash('sha256').update(provided).digest();
+  const expectedHash = crypto.createHash('sha256').update(expected).digest();
+  return crypto.timingSafeEqual(providedHash, expectedHash);
+}
+
+function extractAdminKey(req) {
+  const xAdminKey = req.get('X-Admin-Key');
+  if (typeof xAdminKey === 'string' && xAdminKey.length > 0) return xAdminKey;
+  const authorization = req.get('Authorization');
+  if (typeof authorization === 'string') {
+    const parts = authorization.split(' ');
+    if (parts.length === 2 && parts[0] === 'Bearer' && parts[1].length > 0) {
+      return parts[1];
+    }
+  }
+  return null;
+}
+
+// Report ids are generated as `rpt_<epoch-ms>` (see reportHandler). Accept the
+// same charset broadly; reject empty/oversized/ill-formed ids before any DB
+// access so callers cannot probe the store with junk keys.
+const REPORT_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
+
+app.delete('/api/reports/:id', async (req, res) => {
+  const adminKey = configuredAdminKey();
+  if (!adminKey) {
+    return res
+      .status(503)
+      .json({ error: 'Report deletion is disabled: ADMIN_API_KEY is not configured' });
+  }
+  const providedKey = extractAdminKey(req);
+  if (!providedKey || !adminKeyMatches(providedKey, adminKey)) {
+    return res.status(401).json({ error: 'Invalid or missing admin key' });
+  }
+  const id = req.params.id;
+  if (typeof id !== 'string' || !REPORT_ID_PATTERN.test(id)) {
+    return res.status(400).json({ error: 'Invalid report id' });
+  }
+  // In-memory mode never persisted reports: any well-formed id is not found.
+  if (!db) {
+    return res.status(404).json({ error: 'Report not found' });
+  }
+  try {
+    const report = await db.waitTimeReport.findUnique({ where: { id } });
+    if (!report) {
+      return res.status(404).json({ error: 'Report not found' });
+    }
+    await db.waitTimeReport.delete({ where: { id: report.id } });
+    // Audit line emitted only after the row is really gone.
+    console.info(
+      JSON.stringify({
+        event: 'report_deleted',
+        timestamp: new Date().toISOString(),
+        reportId: report.id,
+        airport: report.airport,
+        checkpoint: report.checkpoint,
+        waitMinutes: report.waitMinutes,
+        reporter: report.reporter,
+        reportedAt:
+          report.createdAt instanceof Date ? report.createdAt.toISOString() : report.createdAt,
+        ip: req.ip || null,
+      })
+    );
+    return res.status(204).send();
+  } catch (err) {
+    // Never answer 404 on a DB error - a real report may exist.
+    console.error(`DELETE /api/reports/${id} error: ${err.message}`);
+    return res.status(500).json({ error: 'Database unavailable' });
+  }
+});
+
 
 // --- VAPID / push notifications --------------------------------------------
 

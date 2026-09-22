@@ -51,4 +51,16 @@ jobs:
           fi
           echo "OK    /api/wait-times?airport=YYY -> 404 (TIR-298 contract)"
 
+          # TIR-299 live guard: the admin delete route must exist in prod.
+          # Without a key it must answer 401 (key configured on Render) or 503
+          # (key not yet configured) - a 404 catch-all body means the deployed
+          # build is missing the route.
+          code=$(curl -s -o /tmp/del_probe.json -w '%{http_code}' --max-time 90 -X DELETE "$BASE_URL/api/reports/rpt_0" || echo 000)
+          if [ "$code" != "401" ] && [ "$code" != "503" ]; then
+            echo "Response body:"
+            head -c 500 /tmp/del_probe.json || true
+            fail "DELETE /api/reports/rpt_0 without key returned HTTP $code (expected 401/503) - TIR-299 route missing from deployed build"
+          fi
+          echo "OK    DELETE /api/reports/rpt_0 -> $code (TIR-299 route present, auth enforced)"
+
           echo "All live smoke checks passed"
