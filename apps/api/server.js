@@ -1157,6 +1157,95 @@ app.get('/api/checkpoints/:id/predict', async (req, res) => {
   });
 });
 
+// --- Checkpoint wait-time history (MVP feature #6) ---------------------------
+// GET /api/checkpoints/:id/history - real reported wait times bucketed into
+// fixed intervals over a rolling window. Powers the per-checkpoint historical
+// chart. Buckets are epoch-aligned multiples of bucketMinutes; each point is
+// the rounded average of the reports in that bucket. No fabrication: a
+// checkpoint without reports returns an empty history.
+
+const HISTORY_BUCKET_MINUTES = new Set([5, 10, 15, 30, 60]);
+
+// Pure core (exported for unit tests): bucket raw reports into epoch-aligned
+// intervals and average each bucket. Input order does not matter; output is
+// ascending by bucket start time. Reports without a parsable timestamp are
+// skipped instead of corrupting a bucket.
+function bucketWaitHistory(reports, bucketMinutes = 30) {
+  if (!HISTORY_BUCKET_MINUTES.has(bucketMinutes)) {
+    throw new Error(`Unsupported bucket size: ${bucketMinutes}`);
+  }
+  const bucketMs = bucketMinutes * 60 * 1000;
+  const byBucket = new Map();
+  for (const report of reports || []) {
+    const raw =
+      report.reportedAt instanceof Date ? report.reportedAt.getTime() : Date.parse(report.reportedAt);
+    if (!Number.isFinite(raw)) continue;
+    const start = Math.floor(raw / bucketMs) * bucketMs;
+    const entry = byBucket.get(start) || { total: 0, count: 0 };
+    entry.total += report.minutes;
+    entry.count += 1;
+    byBucket.set(start, entry);
+  }
+  return [...byBucket.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([start, entry]) => ({
+      time: new Date(start).toISOString(),
+      minutes: Math.round(entry.total / entry.count),
+      count: entry.count,
+    }));
+}
+
+app.get('/api/checkpoints/:id/history', async (req, res) => {
+  const id = req.params.id;
+  if (typeof id !== 'string' || !CHECKPOINT_ID_PATTERN.test(id)) {
+    return res.status(400).json({ error: 'Invalid checkpoint id' });
+  }
+  const windowResult = parseBoundedInt(req.query.window, 4, 1, 24, 'window');
+  if (!windowResult.valid) return res.status(400).json({ error: windowResult.error });
+  let bucketMinutes = 30;
+  if (req.query.bucket !== undefined) {
+    const bucketResult = parseBoundedInt(req.query.bucket, 30, 5, 60, 'bucket');
+    if (!bucketResult.valid) return res.status(400).json({ error: bucketResult.error });
+    if (!HISTORY_BUCKET_MINUTES.has(bucketResult.value)) {
+      return res.status(400).json({ error: 'bucket must be one of: 5, 10, 15, 30, 60' });
+    }
+    bucketMinutes = bucketResult.value;
+  }
+  const cp = findCheckpointById(id);
+  if (!cp) {
+    return res.status(404).json({ error: 'Checkpoint not found' });
+  }
+  const since = new Date(Date.now() - windowResult.value * 60 * 60 * 1000);
+  let reports = [];
+  if (db) {
+    try {
+      const rows = await db.waitTimeReport.findMany({
+        where: { airport: cp.airport.code, checkpoint: cp.name, createdAt: { gte: since } },
+        select: { waitMinutes: true, createdAt: true },
+        orderBy: { createdAt: 'asc' },
+      });
+      reports = rows.map((r) => ({ minutes: r.waitMinutes, reportedAt: r.createdAt }));
+    } catch (err) {
+      // Never serve a fabricated history on a DB error.
+      console.error(`history DB read failed: ${err.message}`);
+      return res.status(500).json({ error: 'Database unavailable' });
+    }
+  }
+  const history = bucketWaitHistory(reports, bucketMinutes);
+  return res.json({
+    data: {
+      checkpointId: id,
+      airportCode: cp.airport.code,
+      airportName: cp.airport.name,
+      name: cp.name,
+      windowHours: windowResult.value,
+      bucketMinutes,
+      reportCount: reports.length,
+      history,
+    },
+  });
+});
+
 // GET /api/airports/:code/forecasts - batch pattern forecast for every
 // checkpoint at an airport in ONE call (powers the Airport page best-time
 // chips without N predict round trips). Checkpoints with no reports return
@@ -1265,3 +1354,6 @@ module.exports.httpServer = server;
 module.exports.computeForecast = computeForecast;
 module.exports.checkpointIdFor = checkpointIdFor;
 module.exports.findCheckpointById = findCheckpointById;
+// Exposed for the test suite: history core unit tests (checkpoint chart)
+// exercise the interval bucketing and averaging directly, without a DB.
+module.exports.bucketWaitHistory = bucketWaitHistory;

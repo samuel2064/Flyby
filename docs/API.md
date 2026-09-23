@@ -55,6 +55,26 @@ Both accept `?horizon=<1-24>` (default 12) and `?days=<1-30>` (default 30). Inva
 - DB read failures answer `500 {"error":"Database unavailable"}` — never a fabricated forecast.
 - Hour bucketing uses the airport's local timezone (`America/New_York` for JFK, etc.).
 
+## Checkpoint history (chart)
+
+| Method | Path                             | Response |
+| ------ | -------------------------------- | -------- |
+| GET    | `/api/checkpoints/:id/history`   | `200 {data:{checkpointId,airportCode,airportName,name,windowHours,bucketMinutes,reportCount,history:[{time,minutes,count}]}}` |
+
+Rolling wait-time history for a checkpoint, from **real reports only** — powers the per-checkpoint
+historical chart (MVP feature #6).
+
+- Accepts `?window=<1-24>` (hours, default 4) and `?bucket=<5\|10\|15\|30\|60>` (minutes, default 30).
+  Invalid values return `400 {"error":"<window\|bucket> must be a positive integer between <min> and <max>"}`;
+  a well-formed but unsupported bucket size returns `400 {"error":"bucket must be one of: 5, 10, 15, 30, 60"}`.
+- `history` is ascending by bucket start time; buckets are epoch-aligned multiples of `bucket`
+  minutes and each point is the rounded average of the reports in that bucket (`count` = reports
+  per bucket).
+- No fabrication: a checkpoint without reports in the window returns `history: []`,
+  `reportCount: 0`. DB read failures answer `500 {"error":"Database unavailable"}`.
+- Id validation matches the forecast endpoints: malformed id → `400 {"error":"Invalid checkpoint id"}`;
+  unknown id → `404 {"error":"Checkpoint not found"}`.
+
 
 ## Wait times
 

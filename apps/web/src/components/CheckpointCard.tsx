@@ -3,6 +3,7 @@ import type { WaitTime } from '../api/types'
 import type { ForecastBestHour } from '../lib/forecastChip'
 import { WaitBadge } from './WaitBadge'
 import { BestTimeChip } from './BestTimeChip'
+import { CheckpointHistory } from './CheckpointHistory'
 
 interface CheckpointCardProps {
   waitTime: WaitTime
@@ -33,6 +34,7 @@ export function CheckpointCard({ waitTime, onReport, best, bestLoading }: Checkp
           Report wait time
         </button>
       </div>
+      <CheckpointHistory airportCode={waitTime.airport} checkpointName={waitTime.checkpoint} />
     </article>
   )
 }

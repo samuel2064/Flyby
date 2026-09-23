@@ -10,7 +10,8 @@ process.env.PORT = '3787'; // dedicated test port; CI boot check uses 3000
 const { test, after } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { httpServer, computeForecast, checkpointIdFor, findCheckpointById } = require('./server.js');
+const { httpServer, computeForecast, checkpointIdFor, findCheckpointById, bucketWaitHistory } =
+  require('./server.js');
 const sharedData = require('../../data/airports.json');
 
 const BASE = `http://127.0.0.1:${process.env.PORT}`;
@@ -737,4 +738,116 @@ test('accepted report responses carry the canonical uppercase airport code', asy
   assert.equal(body.checkpoint, 'Main');
   assert.equal(body.waitMinutes, 12);
   assert.ok(body.id && body.receivedAt);
+});
+
+// --- GET /api/checkpoints/:id/history (checkpoint chart) ----------------------
+
+const BASE_TS = Date.parse('2026-09-23T12:00:00Z');
+function historyReports(...specs) {
+  // [minutesAgo, waitMinutes]
+  return specs.map(([minutesAgo, waitMinutes]) => ({
+    minutes: waitMinutes,
+    reportedAt: new Date(BASE_TS - minutesAgo * 60 * 1000),
+  }));
+}
+
+test('bucketWaitHistory returns empty for no reports (never fabricated)', () => {
+  assert.deepEqual(bucketWaitHistory([], 30), []);
+  assert.deepEqual(bucketWaitHistory(undefined, 30), []);
+});
+
+test('bucketWaitHistory averages reports in the same epoch-aligned bucket', () => {
+  const result = bucketWaitHistory(historyReports([25, 10], [10, 20]), 30);
+  assert.deepEqual(result, [{ time: '2026-09-23T11:30:00.000Z', minutes: 15, count: 2 }]);
+});
+
+test('bucketWaitHistory rounds bucket averages and carries per-bucket counts', () => {
+  const result = bucketWaitHistory(historyReports([25, 10], [10, 21]), 30);
+  // (10 + 21) / 2 = 15.5 -> 16
+  assert.deepEqual(result, [{ time: '2026-09-23T11:30:00.000Z', minutes: 16, count: 2 }]);
+});
+
+test('bucketWaitHistory separates distinct buckets and sorts ascending', () => {
+  const unordered = [
+    { minutes: 30, reportedAt: new Date(BASE_TS - 5 * 60 * 1000) }, // 11:55 -> 11:30 bucket
+    { minutes: 10, reportedAt: new Date(BASE_TS - 40 * 60 * 1000) }, // 11:20 -> 11:00 bucket
+    { minutes: 12, reportedAt: new Date(BASE_TS - 25 * 60 * 1000) }, // 11:35 -> 11:30 bucket
+  ];
+  const result = bucketWaitHistory(unordered, 30);
+  assert.deepEqual(result, [
+    { time: '2026-09-23T11:00:00.000Z', minutes: 10, count: 1 },
+    { time: '2026-09-23T11:30:00.000Z', minutes: 21, count: 2 },
+  ]);
+});
+
+test('bucketWaitHistory honors custom bucket sizes', () => {
+  const result = bucketWaitHistory(historyReports([25, 10], [5, 20]), 10);
+  assert.deepEqual(result, [
+    { time: '2026-09-23T11:30:00.000Z', minutes: 10, count: 1 },
+    { time: '2026-09-23T11:50:00.000Z', minutes: 20, count: 1 },
+  ]);
+});
+
+test('bucketWaitHistory accepts ISO strings as well as Dates', () => {
+  const result = bucketWaitHistory(
+    [{ minutes: 10, reportedAt: '2026-09-23T11:35:00.000Z' }],
+    30,
+  );
+  assert.deepEqual(result, [{ time: '2026-09-23T11:30:00.000Z', minutes: 10, count: 1 }]);
+});
+
+test('bucketWaitHistory skips reports with unparsable timestamps', () => {
+  const good = { minutes: 10, reportedAt: new Date(BASE_TS) };
+  const bad = { minutes: 50, reportedAt: 'not-a-date' };
+  assert.deepEqual(bucketWaitHistory([good, bad], 30), [
+    { time: '2026-09-23T12:00:00.000Z', minutes: 10, count: 1 },
+  ]);
+});
+
+test('bucketWaitHistory rejects unsupported bucket sizes', () => {
+  assert.throws(() => bucketWaitHistory([], 7));
+  assert.throws(() => bucketWaitHistory([], 0));
+});
+
+test('history endpoint returns 400 for a malformed checkpoint id', async () => {
+  await ready;
+  const res = await fetch(`${BASE}/api/checkpoints/Main%20Checkpoint/history`);
+  assert.equal(res.status, 400);
+  assert.deepEqual(await res.json(), { error: 'Invalid checkpoint id' });
+});
+
+test('history endpoint returns 404 for an unknown well-formed checkpoint id', async () => {
+  await ready;
+  const res = await fetch(`${BASE}/api/checkpoints/ck-jfk-north-terminal-2/history`);
+  assert.equal(res.status, 404);
+  assert.deepEqual(await res.json(), { error: 'Checkpoint not found' });
+});
+
+test('history endpoint returns an empty (never fabricated) history for a known checkpoint', async () => {
+  await ready;
+  const res = await fetch(`${BASE}/api/checkpoints/ck-jfk-main/history`);
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.data.checkpointId, 'ck-jfk-main');
+  assert.equal(body.data.airportCode, 'JFK');
+  assert.equal(body.data.name, 'Main');
+  assert.equal(body.data.windowHours, 4);
+  assert.equal(body.data.bucketMinutes, 30);
+  assert.equal(body.data.reportCount, 0); // in-memory mode persists nothing
+  assert.deepEqual(body.data.history, []);
+});
+
+test('history endpoint validates the window and bucket query parameters', async () => {
+  await ready;
+  for (const qs of ['window=0', 'window=25', 'window=abc', 'bucket=7', 'bucket=120', 'bucket=xyz']) {
+    const res = await fetch(`${BASE}/api/checkpoints/ck-jfk-main/history?${qs}`);
+    assert.equal(res.status, 400, qs);
+    const body = await res.json();
+    assert.ok(typeof body.error === 'string' && body.error.length > 0, qs);
+  }
+  const ok = await fetch(`${BASE}/api/checkpoints/ck-jfk-main/history?window=6&bucket=15`);
+  assert.equal(ok.status, 200);
+  const okBody = await ok.json();
+  assert.equal(okBody.data.windowHours, 6);
+  assert.equal(okBody.data.bucketMinutes, 15);
 });
