@@ -7,8 +7,9 @@
 # the database block below (see DATABASE_URL env var).
 #
 # Architecture decision context: https://github.com/Company/Flyby and TIR-179.
-# Frontend (apps/web, Vite PWA) deploys separately on Vercel from the
-# same repo and is intentionally not declared here.
+# Frontend (apps/web, Vite PWA) deploys separately as the `flyby-web` static
+# site from the same repo (declared below); it is intentionally not bundled
+# into the API service.
 #
 # Free tier notes:
 #   - Web service: 750 instance-hours/month (covers a single instance 24/7).
@@ -18,6 +19,22 @@
 # need cross-instance fan-out.
 
 services:
+  - type: web
+    name: flyby-web
+    runtime: static
+    branch: main
+    rootDir: apps/web
+    autoDeploy: true
+    buildCommand: npm ci && npm run build
+    staticPublishPath: dist
+    envVars:
+      - key: VITE_API_BASE_URL
+        value: https://flyby-api.onrender.com
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+
   - type: web
     name: flyby-api
     runtime: node
