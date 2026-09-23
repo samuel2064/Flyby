@@ -550,3 +550,191 @@ test('apt-id lookups work for every supported airport, not just the launch five'
   assert.equal(byCode.status, 200);
   assert.equal((await byCode.json()).code, 'ATL');
 });
+
+// --- TIR-314: the SSE stream carries only REAL wait-time updates ----------------
+// The old handler emitted a fabricated {checkpoint:'Main', waitMinutes:random}
+// frame every 2 seconds - overwriting real reports and inventing data at
+// report-less airports. Now the stream is quiet until a real report is
+// accepted, and accepted reports fan out to the subscribed clients.
+
+// Minimal SSE client over fetch: parses `data:` frames off the raw stream.
+// `close()` aborts the underlying connection so the test server can shut down.
+function openSSE(airport) {
+  const controller = new AbortController();
+  const events = [];
+  const connected = (async () => {
+    const query = airport ? `?airport=${encodeURIComponent(airport)}` : '';
+    const res = await fetch(`${BASE}/api/events${query}`, { signal: controller.signal });
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    (async () => {
+      try {
+        // eslint-disable-next-line no-constant-condition
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          let idx;
+          while ((idx = buffer.indexOf('\n\n')) !== -1) {
+            const frame = buffer.slice(0, idx);
+            buffer = buffer.slice(idx + 2);
+            // Only `data:` lines carry events; keepalive comments (": ping") are
+            // intentionally ignored here, exactly like EventSource does.
+            for (const line of frame.split('\n')) {
+              if (line.startsWith('data: ')) events.push(JSON.parse(line.slice(6)));
+            }
+          }
+        }
+      } catch {
+        // aborted by close()
+      }
+    })();
+    return res;
+  })();
+  return {
+    events,
+    connected,
+    async waitFor(predicate, timeoutMs) {
+      const start = Date.now();
+      while (Date.now() - start < timeoutMs) {
+        const hit = events.find(predicate);
+        if (hit) return hit;
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      return events.find(predicate) || null;
+    },
+    async collectQuietly(durationMs) {
+      await new Promise((resolve) => setTimeout(resolve, durationMs));
+      return events;
+    },
+    close() {
+      controller.abort();
+    },
+  };
+}
+
+test('SSE opens with a connected event and then stays quiet - no fabricated updates', async () => {
+  await ready;
+  // ATL is canonical but report-less in in-memory mode: the stream must show
+  // the honest empty state, not invented numbers.
+  const client = openSSE('ATL');
+  try {
+    const connected = await client.waitFor((ev) => ev.type === 'connected', 5000);
+    assert.ok(connected, 'connected frame must arrive');
+    assert.ok(!isNaN(Date.parse(connected.timestamp)), 'connected carries an ISO timestamp');
+    // The old implementation fabricated a wait-time-update every 2s; watching
+    // for longer than that interval is the regression guard.
+    const events = await client.collectQuietly(2600);
+    assert.ok(
+      !events.some((ev) => ev.type === 'wait-time-update'),
+      `stream must not fabricate wait-time-update frames, got: ${JSON.stringify(events.filter((e) => e.type === 'wait-time-update'))}`,
+    );
+  } finally {
+    client.close();
+  }
+});
+
+test('accepted reports fan out over SSE to subscribed and unfiltered clients only', async () => {
+  await ready;
+  const jfk = openSSE('JFK');
+  const sea = openSSE('SEA');
+  const unfiltered = openSSE(null);
+  try {
+    await Promise.all([
+      jfk.waitFor((ev) => ev.type === 'connected', 5000),
+      sea.waitFor((ev) => ev.type === 'connected', 5000),
+      unfiltered.waitFor((ev) => ev.type === 'connected', 5000),
+    ]);
+
+    const res = await fetch(`${BASE}/api/wait-times`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-User-Id': 'sse-fanout-user-1' },
+      body: JSON.stringify({
+        airport: 'JFK',
+        checkpoint: 'Terminal 4 Security',
+        waitMinutes: 37,
+      }),
+    });
+    assert.equal(res.status, 201);
+
+    const onJfk = await jfk.waitFor(
+      (ev) => ev.type === 'wait-time-update' && ev.checkpoint === 'Terminal 4 Security',
+      5000,
+    );
+    assert.ok(onJfk, 'JFK-subscribed client must receive the real report');
+    assert.equal(onJfk.airport, 'JFK');
+    assert.equal(onJfk.waitMinutes, 37);
+    assert.ok(!isNaN(Date.parse(onJfk.timestamp)), 'update carries the report timestamp');
+
+    const onUnfiltered = await unfiltered.waitFor(
+      (ev) => ev.type === 'wait-time-update' && ev.checkpoint === 'Terminal 4 Security',
+      5000,
+    );
+    assert.ok(onUnfiltered, 'unfiltered client must receive the real report');
+    assert.equal(onUnfiltered.waitMinutes, 37);
+
+    // Airport filtering: SEA subscribers must not see JFK's report.
+    const seaEvents = await sea.collectQuietly(600);
+    assert.ok(
+      !seaEvents.some((ev) => ev.type === 'wait-time-update'),
+      'SEA-subscribed client must not receive JFK updates',
+    );
+  } finally {
+    jfk.close();
+    sea.close();
+    unfiltered.close();
+  }
+});
+
+test('reports for unknown airports are rejected at the boundary (404, never persisted or broadcast)', async () => {
+  await ready;
+  const client = openSSE(null);
+  try {
+    await client.waitFor((ev) => ev.type === 'connected', 5000);
+    const before = client.events.length;
+
+    const res = await fetch(`${BASE}/api/wait-times`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-User-Id': 'sse-unknown-airport-user' },
+      body: JSON.stringify({ airport: 'QALOCAL', checkpoint: 'Main', waitMinutes: 10 }),
+    });
+    assert.equal(res.status, 404);
+    assert.deepEqual(await res.json(), { error: 'Airport not found' });
+
+    const events = await client.collectQuietly(500);
+    assert.equal(events.length, before, 'rejected reports must not be broadcast');
+  } finally {
+    client.close();
+  }
+});
+
+test('report waitMinutes is bounded to 1-300', async () => {
+  await ready;
+  for (const minutes of [301, 0, -5]) {
+    const res = await fetch(`${BASE}/api/wait-times`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-User-Id': `sse-bounds-user-${minutes}` },
+      body: JSON.stringify({ airport: 'JFK', checkpoint: 'Main', waitMinutes: minutes }),
+    });
+    assert.equal(res.status, 400, `waitMinutes=${minutes}`);
+    const body = await res.json();
+    assert.ok(Array.isArray(body.errors));
+    assert.ok(body.errors.some((e) => e.field === 'waitMinutes'));
+  }
+});
+
+test('accepted report responses carry the canonical uppercase airport code', async () => {
+  await ready;
+  const res = await fetch(`${BASE}/api/wait-times`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-User-Id': 'sse-canonical-user' },
+    body: JSON.stringify({ airport: 'jfk', checkpoint: 'Main', waitMinutes: 12 }),
+  });
+  assert.equal(res.status, 201);
+  const body = await res.json();
+  assert.equal(body.airport, 'JFK');
+  assert.equal(body.checkpoint, 'Main');
+  assert.equal(body.waitMinutes, 12);
+  assert.ok(body.id && body.receivedAt);
+});

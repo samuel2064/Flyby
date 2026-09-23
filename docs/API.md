@@ -61,7 +61,7 @@ Both accept `?horizon=<1-24>` (default 12) and `?days=<1-30>` (default 30). Inva
 | Method | Path                    | Response                                                                                       |
 | ------ | ----------------------- | ---------------------------------------------------------------------------------------------- |
 | GET    | `/api/wait-times`       | `200 [{airport,checkpoint,waitMinutes,updatedAt}]` — optional `?airport=<CODE\|apt-id>` or `?airportId=<CODE\|apt-id>` (case-insensitive). Known airports with no reports return `200 []`. Unknown airports return `404 {"error":"Airport not found"}`. Records are never fabricated (TIR-298). |
-| POST   | `/api/wait-times`       | `201 {id,...body,waitMinutes,receivedAt}`; body `{airport:string, checkpoint?:string, waitMinutes:positive int}`. Validation errors: `400 {"errors":[...]}`. Rate limit: 30s per user/IP → `429` with `Retry-After`. Alias: `POST /api/wait-times/report` |
+| POST   | `/api/wait-times`       | `201 {id,airport,checkpoint,waitMinutes,receivedAt}`; body `{airport:string, checkpoint?:string, waitMinutes:1-300}`. Unknown airports are rejected at the boundary: `404 {"error":"Airport not found"}` (TIR-314 — no residue to purge later). Validation errors: `400 {"errors":[...]}`. Rate limit: 30s per user/IP → `429` with `Retry-After`. Alias: `POST /api/wait-times/report` |
 
 ## Reports (admin)
 
@@ -99,6 +99,13 @@ Per-user limit: 10 subscriptions (non-anonymous).
 | Method | Path                                          | Response                                              |
 | ------ | --------------------------------------------- | ----------------------------------------------------- |
 | GET    | `/api/events` (aliases `/api/wait-times/stream`, `/api/sse`) | `200 text/event-stream` (connect + wait-time-update frames) |
+
+`?airport=<CODE>` filters the stream to that airport. Frames: `{"type":"connected","timestamp"}` on
+open, then `{"type":"wait-time-update","airport","checkpoint","waitMinutes","timestamp"}` — one per
+**accepted report** (`POST /api/wait-times`), fanned out to the clients subscribed to that airport
+(and to clients without a filter). A `: ping` keepalive comment is sent every ~20s so proxies keep
+the connection open; it is invisible to `EventSource`. Nothing is ever synthesized: a stream with no
+reports stays quiet — no fabricated values (TIR-314, same trust principle as TIR-298).
 
 ## Push
 

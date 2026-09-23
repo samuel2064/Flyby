@@ -70,8 +70,21 @@ const VAPID_PUBLIC_KEY =
   'BMqC9TckHTr2DdYFqviDHxDoQZFKQz0zTbvk1KwUqJvXcbYQzPxmZbQ0c9kYvA1p1w0fKk1w2yQ0pXy9m5Qq0R8';
 
 // --- SSE live updates -------------------------------------------------------
+// TIR-314: the stream carries only REAL wait-time updates. When a report is
+// accepted (POST /api/wait-times), it fans out to the SSE clients subscribed
+// to that airport (and to clients without an airport filter). Nothing is
+// synthesized anymore: a quiet stream stays quiet, so a client watching a
+// report-less airport sees the honest empty state instead of fake numbers
+// (same trust principle as the TIR-298 GET fix). A keepalive comment frame
+// (": ping") keeps proxy connections from idling out without emitting data.
 
-const sseClients = new Set();
+const sseClients = new Map(); // response -> subscribed airport code (or null)
+const SSE_KEEPALIVE_MS =
+  Number(process.env.SSE_KEEPALIVE_MS) > 0 ? Number(process.env.SSE_KEEPALIVE_MS) : 20000;
+
+function sseWrite(res, payload) {
+  res.write(`data: ${JSON.stringify(payload)}\n\n`);
+}
 
 function sseHandler(req, res) {
   res.writeHead(200, {
@@ -81,26 +94,42 @@ function sseHandler(req, res) {
     'Access-Control-Allow-Origin': '*',
   });
   res.write('retry: 3000\n\n');
-  res.write(`data: ${JSON.stringify({ type: 'connected', timestamp: new Date().toISOString() })}\n\n`);
+  sseWrite(res, { type: 'connected', timestamp: new Date().toISOString() });
 
-  const interval = setInterval(() => {
-    res.write(
-      `data: ${JSON.stringify({
-        type: 'wait-time-update',
-        airport: req.query.airport || 'SEA',
-        checkpoint: 'Main',
-        waitMinutes: Math.floor(Math.random() * 20) + 5,
-        timestamp: new Date().toISOString(),
-      })}\n\n`
-    );
-  }, 2000);
+  const subscribedAirport = req.query.airport
+    ? String(req.query.airport).trim().toUpperCase()
+    : null;
+  // SSE comment frames are invisible to EventSource but keep the connection
+  // open through proxies (Render idles out quiet connections).
+  const keepalive = setInterval(() => {
+    res.write(': ping\n\n');
+  }, SSE_KEEPALIVE_MS);
 
-  sseClients.add(res);
+  sseClients.set(res, subscribedAirport);
   req.on('close', () => {
-    clearInterval(interval);
+    clearInterval(keepalive);
     sseClients.delete(res);
     res.end();
   });
+}
+
+// Fan an accepted report out to matching SSE clients. Never throws: a dead
+// socket must not break the 201 report response.
+function broadcastWaitTime({ airport, checkpoint, waitMinutes, reportedAt }) {
+  for (const [client, subscribedAirport] of sseClients) {
+    if (subscribedAirport && airport && subscribedAirport !== airport) continue;
+    try {
+      sseWrite(client, {
+        type: 'wait-time-update',
+        airport,
+        checkpoint,
+        waitMinutes,
+        timestamp: reportedAt,
+      });
+    } catch (err) {
+      sseClients.delete(client);
+    }
+  }
 }
 
 app.get('/api/events', sseHandler);
@@ -155,6 +184,7 @@ function reportLimitKey(req, body) {
   return `ip:${req.ip || 'unknown'}`;
 }
 
+const MAX_WAIT_MINUTES = 300;
 const reportHandler = async (req, res) => {
   const body = req.body || {};
   const waitMinutesValue =
@@ -175,7 +205,24 @@ const reportHandler = async (req, res) => {
   ) {
     errors.push({ field: 'waitMinutes', message: 'waitMinutes must be a positive integer' });
   }
+  if (Number.isInteger(waitMinutesValue) && waitMinutesValue > MAX_WAIT_MINUTES) {
+    errors.push({
+      field: 'waitMinutes',
+      message: `waitMinutes must be between 1 and ${MAX_WAIT_MINUTES}`,
+    });
+  }
   if (errors.length) return res.status(400).json({ errors });
+
+  // Boundary validation (TIR-314): only reports for canonical airports are
+  // accepted. Previously unknown-airport reports (QALOCAL, "123", ...) were
+  // persisted and had to be purged at boot (TIR-294); now they are rejected
+  // at the edge and never written. The code is stored uppercase so GET
+  // filters and the residue purge both see a single canonical form.
+  const airportCode = body.airport.trim().toUpperCase();
+  if (!AIRPORTS.some((a) => a.code === airportCode)) {
+    return res.status(404).json({ error: 'Airport not found' });
+  }
+  const checkpointName = String(body.checkpoint || 'Main');
 
   const limitKey = reportLimitKey(req, body);
   const now = Date.now();
@@ -200,8 +247,8 @@ const reportHandler = async (req, res) => {
       await db.waitTimeReport.create({
         data: {
           id,
-          airport: body.airport.trim(),
-          checkpoint: String(body.checkpoint || 'Main'),
+          airport: airportCode,
+          checkpoint: checkpointName,
           waitMinutes: waitMinutesValue,
           reporter: body.reporter || body.userId || null,
         },
@@ -211,7 +258,22 @@ const reportHandler = async (req, res) => {
     console.warn(`POST /api/wait-times/report DB fallback: ${err.message}`);
   }
   reportRateLimits.set(limitKey, Date.now());
-  res.status(201).json({ id, ...body, waitMinutes: waitMinutesValue, receivedAt });
+  // Real-time fan-out (TIR-314): every accepted report is pushed to the SSE
+  // clients watching this airport. Only real reports flow - never fabricated
+  // values.
+  broadcastWaitTime({
+    airport: airportCode,
+    checkpoint: checkpointName,
+    waitMinutes: waitMinutesValue,
+    reportedAt: receivedAt,
+  });
+  res.status(201).json({
+    id,
+    airport: airportCode,
+    checkpoint: checkpointName,
+    waitMinutes: waitMinutesValue,
+    receivedAt,
+  });
 };
 
 // Report submission: canonical path is POST /api/wait-times; /report is kept
@@ -737,7 +799,7 @@ const triggerHandler = (req, res) => {
     subscriptionId,
     timestamp: new Date().toISOString(),
   };
-  for (const client of sseClients) {
+  for (const client of sseClients.keys()) {
     client.write(`data: ${JSON.stringify(payload)}\n\n`);
   }
   res.status(200).json({ sent: true, messageId, payload, deliveredTo: sseClients.size });
