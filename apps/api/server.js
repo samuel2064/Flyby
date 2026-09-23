@@ -1,5 +1,8 @@
 const express = require('express');
 const crypto = require('crypto');
+// Single source of truth for airport + checkpoint data, shared with apps/web
+// (imported at build time) so the API and the web mirror can never drift.
+const FLYBY_DATA = require('../../data/airports.json');
 const app = express();
 const port = process.env.PORT || 3000;
 
@@ -322,9 +325,9 @@ app.get('/api/push/vapidPublicKey', vapidHandler);
 app.get('/api/vapid-public-key', vapidHandler);
 
 // Subscribe (QA spec: FLAT response, idempotent per endpoint+airportId, validation)
-const AIRPORT_CODES = {
-  'apt-jfk': 'JFK', 'apt-sea': 'SEA', 'apt-lax': 'LAX', 'apt-ord': 'ORD', 'apt-sfo': 'SFO',
-};
+// TIR-313: derived from the shared data so every supported airport's apt-id
+// resolves (wait-times ?airportId= and subscriptions alike).
+const AIRPORT_CODES = Object.fromEntries(FLYBY_DATA.airports.map((a) => [a.id, a.code]));
 const MAX_SUBS_PER_USER = 10;
 const UNKNOWN_USERS = new Set(['user-unknown']);
 
@@ -743,25 +746,16 @@ app.post('/api/notifications/trigger', triggerHandler);
 app.post('/api/push/trigger', triggerHandler);
 app.post('/api/notifications/test', triggerHandler);
 
-// --- Airports + checkpoints reference data (TIR-287) ------------------------
-// Canonical list mirrors apps/web/src/data/airports.ts so the API and web
-// frontend describe the same supported airports.
+// --- Airports + checkpoints reference data (TIR-287, TIR-313) -----------------
+// 51 airports / 164 checkpoints ported from the monorepo's canonical data.
+// Source of truth: ../../data/airports.json (shared with apps/web so the API
+// and the web frontend describe the same supported airports - single file,
+// no hand-synced mirror to drift). The five airports that launched the live
+// app (JFK, SEA, LAX, ORD, SFO) keep their original 'Main' checkpoint first
+// so existing production reports and forecast ids stay valid.
 
-const AIRPORTS = [
-  { id: 'apt-jfk', code: 'JFK', name: 'John F. Kennedy International', city: 'New York', timezone: 'America/New_York' },
-  { id: 'apt-sea', code: 'SEA', name: 'Seattle-Tacoma International', city: 'Seattle', timezone: 'America/Los_Angeles' },
-  { id: 'apt-lax', code: 'LAX', name: 'Los Angeles International', city: 'Los Angeles', timezone: 'America/Los_Angeles' },
-  { id: 'apt-ord', code: 'ORD', name: "O'Hare International", city: 'Chicago', timezone: 'America/Chicago' },
-  { id: 'apt-sfo', code: 'SFO', name: 'San Francisco International', city: 'San Francisco', timezone: 'America/Los_Angeles' },
-];
-
-const CHECKPOINTS_BY_AIRPORT = {
-  JFK: ['Main'],
-  SEA: ['Main'],
-  LAX: ['Main'],
-  ORD: ['Main'],
-  SFO: ['Main'],
-};
+const AIRPORTS = FLYBY_DATA.airports;
+const CHECKPOINTS_BY_AIRPORT = FLYBY_DATA.checkpointsByAirport;
 
 // --- Production data hygiene (TIR-294) --------------------------------------
 // QA/test residue must never be visible in production: reports for airports

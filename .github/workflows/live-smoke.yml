@@ -44,6 +44,11 @@ jobs:
           # catch-all 404 {"error":"not_found"} means the build is stale.
           probe "/api/airports/JFK/forecasts" '"airportCode":"JFK"'
           probe "/api/checkpoints/ck-jfk-main/predict" '"checkpointId":"ck-jfk-main"'
+          # TIR-313: the 51-airport expansion must be live. A missing ATL in
+          # the airport list (or a 404 on its wait-times) means the deployed
+          # build still carries the old 5-airport data file.
+          probe "/api/airports" '"code":"ATL"'
+          probe "/api/checkpoints?airport=ATL" '"Domestic North Checkpoint A"'
 
           # TIR-298 live guard: unknown airports must return app-level 404,
           # never a fabricated wait-time record.

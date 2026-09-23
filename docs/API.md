@@ -15,16 +15,16 @@ Malformed JSON bodies return `400 {"error":"bad_request"}`.
 
 | Method | Path           | Response                                                                                |
 | ------ | -------------- | --------------------------------------------------------------------------------------- |
-| GET    | `/api/airports` | `200 {"airports":[{id,code,name,city}]}` — optional `?q=` filters by code/city/name    |
-| GET    | `/api/airports/:code` | `200 {id,code,name,city}` — accepts either the code (`JFK`) or the id (`apt-jfk`); unknown airport `404 {"errors":[{field:"code",message}]}` |
+| GET    | `/api/airports` | `200 {"airports":[{id,code,name,city,timezone}]}` — all 51 supported airports (TIR-313); optional `?q=` filters by code/city/name    |
+| GET    | `/api/airports/:code` | `200 {id,code,name,city,timezone}` — accepts either the code (`JFK`) or the id (`apt-jfk`); unknown airport `404 {"errors":[{field:"code",message}]}` |
 
-Supported airports: JFK, SEA, LAX, ORD, SFO (mirrors `apps/web/src/data/airports.ts`).
+Supported airports: 51 major US airports (JFK, SEA, LAX, ORD, SFO, ATL, DEN, LAS, MCO, ... full list in `data/airports.json`, the single source shared by the API and `apps/web`).
 
 ## Checkpoints
 
 | Method | Path               | Response                                                                                     |
 | ------ | ------------------ | -------------------------------------------------------------------------------------------- |
-| GET    | `/api/checkpoints` | `200 {"checkpoints":[{airport,name}]}` — optional `?airport=<CODE\|apt-id>` or `?airportId=<CODE\|apt-id>` filters |
+| GET    | `/api/checkpoints` | `200 {"checkpoints":[{airport,name}]}` — 164 checkpoints across 51 airports; optional `?airport=<CODE\|apt-id>` or `?airportId=<CODE\|apt-id>` filters |
 
 Unknown airport in `?airport=`/`?airportId=` returns `404 {"errors":[{field:"airport",message}]}`.
 

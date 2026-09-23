@@ -11,6 +11,7 @@ const { test, after } = require('node:test');
 const assert = require('node:assert/strict');
 
 const { httpServer, computeForecast, checkpointIdFor, findCheckpointById } = require('./server.js');
+const sharedData = require('../../data/airports.json');
 
 const BASE = `http://127.0.0.1:${process.env.PORT}`;
 
@@ -252,16 +253,20 @@ test('batch forecasts return one forecast per checkpoint for a known airport', a
   assert.equal(body.data.timezone, 'America/New_York');
   assert.equal(body.data.historyDays, 30);
   assert.equal(body.data.horizon, 12);
-  assert.equal(body.data.forecasts.length, 1);
-  const forecast = body.data.forecasts[0];
-  assert.equal(forecast.checkpointId, 'ck-jfk-main');
-  assert.equal(forecast.name, 'Main');
-  assert.equal(forecast.code, null);
-  assert.equal(forecast.terminal, null);
+  // One forecast per configured checkpoint (TIR-313: JFK now carries its real
+  // terminal checkpoints in addition to the launch-era 'Main').
+  const jfkCheckpoints = sharedData.checkpointsByAirport.JFK;
+  assert.equal(body.data.forecasts.length, jfkCheckpoints.length);
+  assert.ok(body.data.forecasts.length >= 1);
+  const main = body.data.forecasts.find((f) => f.checkpointId === 'ck-jfk-main');
+  assert.ok(main, 'ck-jfk-main forecast must be present');
+  assert.equal(main.name, 'Main');
+  assert.equal(main.code, null);
+  assert.equal(main.terminal, null);
   // No persisted reports -> empty forecast, never fabricated values (TIR-298 trust principle)
-  assert.equal(forecast.sampleCount, 0);
-  assert.deepEqual(forecast.predictions, []);
-  assert.deepEqual(forecast.bestHours, []);
+  assert.equal(main.sampleCount, 0);
+  assert.deepEqual(main.predictions, []);
+  assert.deepEqual(main.bestHours, []);
 });
 
 test('batch forecasts normalize lowercase airport codes', async () => {
@@ -451,4 +456,97 @@ test('computeForecast blends live consensus into the imminent slots without doub
     const matching = core.predictions.find((p) => p.hour === best.hour);
     assert.ok(matching && matching.source !== 'fallback');
   }
+});
+
+// --- TIR-313: 51-airport expansion (shared data/airports.json) ----------------
+
+test('GET /api/airports returns the full expanded list (51) with complete shape', async () => {
+  await ready;
+  const res = await fetch(`${BASE}/api/airports`);
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.ok(Array.isArray(body.airports));
+  assert.equal(body.airports.length, 51);
+  for (const a of body.airports) {
+    assert.ok(a.id && typeof a.id === 'string', `airport ${a.code} needs id`);
+    assert.match(a.code, /^[A-Z]{3}$/);
+    assert.ok(a.name && a.city && a.timezone);
+  }
+  const jfk = body.airports.find((a) => a.code === 'JFK');
+  assert.equal(jfk.id, 'apt-jfk');
+  assert.equal(jfk.name, 'John F. Kennedy International');
+  assert.equal(jfk.timezone, 'America/New_York');
+  // Expansion unlock: ATL (and the other 45 new airports) are first-class now.
+  assert.ok(body.airports.some((a) => a.code === 'ATL'));
+});
+
+test('GET /api/airports?q= filters across the expanded list', async () => {
+  await ready;
+  const res = await fetch(`${BASE}/api/airports?q=atlanta`);
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.airports.length, 1);
+  assert.equal(body.airports[0].code, 'ATL');
+});
+
+test('expanded airports are canonical: wait-times no longer 404s for ATL', async () => {
+  await ready;
+  const res = await fetch(`${BASE}/api/wait-times?airport=ATL`);
+  assert.equal(res.status, 200);
+  assert.deepEqual(await res.json(), []);
+});
+
+test('GET /api/checkpoints exposes real checkpoint names for expanded airports', async () => {
+  await ready;
+  const res = await fetch(`${BASE}/api/checkpoints?airport=ATL`);
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.airport, 'ATL');
+  assert.ok(body.checkpoints.length >= 4);
+  assert.ok(body.checkpoints.some((c) => c.name === 'Domestic North Checkpoint A'));
+
+  const all = await fetch(`${BASE}/api/checkpoints`);
+  const allBody = await all.json();
+  const expectedTotal = Object.values(sharedData.checkpointsByAirport).reduce(
+    (sum, list) => sum + list.length, 0);
+  assert.equal(allBody.checkpoints.length, expectedTotal);
+});
+
+test('launch airports keep their Main checkpoint so production reports stay valid', async () => {
+  for (const code of ['JFK', 'SEA', 'LAX', 'ORD', 'SFO']) {
+    const names = sharedData.checkpointsByAirport[code];
+    assert.equal(names[0], 'Main', `${code} must keep Main first`);
+    assert.equal(checkpointIdFor(code, 'Main'), `ck-${code.toLowerCase()}-main`);
+    const found = findCheckpointById(`ck-${code.toLowerCase()}-main`);
+    assert.ok(found, `ck-${code.toLowerCase()}-main must resolve`);
+  }
+});
+
+test('stable checkpoint ids derive for real multi-word checkpoint names', async () => {
+  const id = 'ck-atl-domestic-north-checkpoint-a';
+  const found = findCheckpointById(id);
+  assert.ok(found);
+  assert.equal(found.airport.code, 'ATL');
+  assert.equal(found.name, 'Domestic North Checkpoint A');
+});
+
+test('predict for a report-less expanded checkpoint returns empty predictions (no fabrication)', async () => {
+  await ready;
+  const res = await fetch(`${BASE}/api/checkpoints/ck-atl-domestic-north-checkpoint-a/predict`);
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.data.sampleCount, 0);
+  assert.deepEqual(body.data.predictions, []);
+  assert.deepEqual(body.data.bestHours, []);
+  assert.equal(body.data.checkpointId, 'ck-atl-domestic-north-checkpoint-a');
+});
+
+test('apt-id lookups work for every supported airport, not just the launch five', async () => {
+  await ready;
+  const res = await fetch(`${BASE}/api/wait-times?airportId=apt-atl`);
+  assert.equal(res.status, 200);
+  assert.deepEqual(await res.json(), []);
+  const byCode = await fetch(`${BASE}/api/airports/atL`);
+  assert.equal(byCode.status, 200);
+  assert.equal((await byCode.json()).code, 'ATL');
 });

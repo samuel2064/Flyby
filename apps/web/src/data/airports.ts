@@ -1,3 +1,8 @@
+// Airport reference data. Single source of truth: the repo-root
+// data/airports.json, shared with apps/api/server.js (required at runtime) so
+// the API and the web app can never describe different airports.
+import sharedData from '../../../../data/airports.json'
+
 export interface Airport {
   id: string
   code: string
@@ -6,15 +11,12 @@ export interface Airport {
   timezone: string
 }
 
-export const AIRPORTS: Airport[] = [
-  { id: 'apt-jfk', code: 'JFK', name: 'John F. Kennedy International', city: 'New York', timezone: 'America/New_York' },
-  { id: 'apt-sea', code: 'SEA', name: 'Seattle-Tacoma International', city: 'Seattle', timezone: 'America/Los_Angeles' },
-  { id: 'apt-lax', code: 'LAX', name: 'Los Angeles International', city: 'Los Angeles', timezone: 'America/Los_Angeles' },
-  { id: 'apt-ord', code: 'ORD', name: "O'Hare International", city: 'Chicago', timezone: 'America/Chicago' },
-  { id: 'apt-sfo', code: 'SFO', name: 'San Francisco International', city: 'San Francisco', timezone: 'America/Los_Angeles' },
-]
+export const AIRPORTS: Airport[] = sharedData.airports
 
-export const DEFAULT_AIRPORT = AIRPORTS[1]
+// Explicit code lookup - never a positional index, which broke silently the
+// moment the list grew beyond the launch set.
+export const DEFAULT_AIRPORT: Airport =
+  AIRPORTS.find((a) => a.code === 'SEA') ?? AIRPORTS[0]
 
 export function searchAirports(query: string): Airport[] {
   const q = query.trim().toLowerCase()

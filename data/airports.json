@@ -1,0 +1,629 @@
+{
+  "airports": [
+    {
+      "id": "apt-jfk",
+      "code": "JFK",
+      "name": "John F. Kennedy International",
+      "city": "New York",
+      "timezone": "America/New_York"
+    },
+    {
+      "id": "apt-sea",
+      "code": "SEA",
+      "name": "Seattle-Tacoma International",
+      "city": "Seattle",
+      "timezone": "America/Los_Angeles"
+    },
+    {
+      "id": "apt-lax",
+      "code": "LAX",
+      "name": "Los Angeles International",
+      "city": "Los Angeles",
+      "timezone": "America/Los_Angeles"
+    },
+    {
+      "id": "apt-ord",
+      "code": "ORD",
+      "name": "O'Hare International",
+      "city": "Chicago",
+      "timezone": "America/Chicago"
+    },
+    {
+      "id": "apt-sfo",
+      "code": "SFO",
+      "name": "San Francisco International",
+      "city": "San Francisco",
+      "timezone": "America/Los_Angeles"
+    },
+    {
+      "id": "apt-atl",
+      "code": "ATL",
+      "name": "Hartsfield-Jackson Atlanta International",
+      "city": "Atlanta",
+      "timezone": "America/New_York"
+    },
+    {
+      "id": "apt-dfw",
+      "code": "DFW",
+      "name": "Dallas/Fort Worth International",
+      "city": "Dallas",
+      "timezone": "America/Chicago"
+    },
+    {
+      "id": "apt-den",
+      "code": "DEN",
+      "name": "Denver International",
+      "city": "Denver",
+      "timezone": "America/Denver"
+    },
+    {
+      "id": "apt-las",
+      "code": "LAS",
+      "name": "Harry Reid International",
+      "city": "Las Vegas",
+      "timezone": "America/Los_Angeles"
+    },
+    {
+      "id": "apt-mco",
+      "code": "MCO",
+      "name": "Orlando International",
+      "city": "Orlando",
+      "timezone": "America/New_York"
+    },
+    {
+      "id": "apt-clt",
+      "code": "CLT",
+      "name": "Charlotte Douglas International",
+      "city": "Charlotte",
+      "timezone": "America/New_York"
+    },
+    {
+      "id": "apt-ewr",
+      "code": "EWR",
+      "name": "Newark Liberty International",
+      "city": "Newark",
+      "timezone": "America/New_York"
+    },
+    {
+      "id": "apt-phx",
+      "code": "PHX",
+      "name": "Phoenix Sky Harbor International",
+      "city": "Phoenix",
+      "timezone": "America/Phoenix"
+    },
+    {
+      "id": "apt-mia",
+      "code": "MIA",
+      "name": "Miami International",
+      "city": "Miami",
+      "timezone": "America/New_York"
+    },
+    {
+      "id": "apt-iah",
+      "code": "IAH",
+      "name": "George Bush Intercontinental",
+      "city": "Houston",
+      "timezone": "America/Chicago"
+    },
+    {
+      "id": "apt-bos",
+      "code": "BOS",
+      "name": "Logan International",
+      "city": "Boston",
+      "timezone": "America/New_York"
+    },
+    {
+      "id": "apt-msp",
+      "code": "MSP",
+      "name": "Minneapolis-Saint Paul International",
+      "city": "Minneapolis",
+      "timezone": "America/Chicago"
+    },
+    {
+      "id": "apt-dtw",
+      "code": "DTW",
+      "name": "Detroit Metropolitan Wayne County",
+      "city": "Detroit",
+      "timezone": "America/Detroit"
+    },
+    {
+      "id": "apt-fll",
+      "code": "FLL",
+      "name": "Fort Lauderdale-Hollywood International",
+      "city": "Fort Lauderdale",
+      "timezone": "America/New_York"
+    },
+    {
+      "id": "apt-phl",
+      "code": "PHL",
+      "name": "Philadelphia International",
+      "city": "Philadelphia",
+      "timezone": "America/New_York"
+    },
+    {
+      "id": "apt-bwi",
+      "code": "BWI",
+      "name": "Baltimore/Washington International Thurgood Marshall",
+      "city": "Baltimore",
+      "timezone": "America/New_York"
+    },
+    {
+      "id": "apt-dca",
+      "code": "DCA",
+      "name": "Ronald Reagan Washington National",
+      "city": "Arlington",
+      "timezone": "America/New_York"
+    },
+    {
+      "id": "apt-mdw",
+      "code": "MDW",
+      "name": "Chicago Midway International",
+      "city": "Chicago",
+      "timezone": "America/Chicago"
+    },
+    {
+      "id": "apt-tpa",
+      "code": "TPA",
+      "name": "Tampa International",
+      "city": "Tampa",
+      "timezone": "America/New_York"
+    },
+    {
+      "id": "apt-san",
+      "code": "SAN",
+      "name": "San Diego International",
+      "city": "San Diego",
+      "timezone": "America/Los_Angeles"
+    },
+    {
+      "id": "apt-slc",
+      "code": "SLC",
+      "name": "Salt Lake City International",
+      "city": "Salt Lake City",
+      "timezone": "America/Denver"
+    },
+    {
+      "id": "apt-pdx",
+      "code": "PDX",
+      "name": "Portland International",
+      "city": "Portland",
+      "timezone": "America/Los_Angeles"
+    },
+    {
+      "id": "apt-stl",
+      "code": "STL",
+      "name": "St. Louis Lambert International",
+      "city": "St. Louis",
+      "timezone": "America/Chicago"
+    },
+    {
+      "id": "apt-cvg",
+      "code": "CVG",
+      "name": "Cincinnati/Northern Kentucky International",
+      "city": "Cincinnati",
+      "timezone": "America/New_York"
+    },
+    {
+      "id": "apt-rdu",
+      "code": "RDU",
+      "name": "Raleigh-Durham International",
+      "city": "Raleigh",
+      "timezone": "America/New_York"
+    },
+    {
+      "id": "apt-ind",
+      "code": "IND",
+      "name": "Indianapolis International",
+      "city": "Indianapolis",
+      "timezone": "America/Indiana/Indianapolis"
+    },
+    {
+      "id": "apt-aus",
+      "code": "AUS",
+      "name": "Austin-Bergstrom International",
+      "city": "Austin",
+      "timezone": "America/Chicago"
+    },
+    {
+      "id": "apt-dal",
+      "code": "DAL",
+      "name": "Dallas Love Field",
+      "city": "Dallas",
+      "timezone": "America/Chicago"
+    },
+    {
+      "id": "apt-bna",
+      "code": "BNA",
+      "name": "Nashville International",
+      "city": "Nashville",
+      "timezone": "America/Chicago"
+    },
+    {
+      "id": "apt-smf",
+      "code": "SMF",
+      "name": "Sacramento International",
+      "city": "Sacramento",
+      "timezone": "America/Los_Angeles"
+    },
+    {
+      "id": "apt-mci",
+      "code": "MCI",
+      "name": "Kansas City International",
+      "city": "Kansas City",
+      "timezone": "America/Chicago"
+    },
+    {
+      "id": "apt-hnl",
+      "code": "HNL",
+      "name": "Daniel K. Inouye International",
+      "city": "Honolulu",
+      "timezone": "Pacific/Honolulu"
+    },
+    {
+      "id": "apt-oak",
+      "code": "OAK",
+      "name": "San Francisco Bay Oakland International",
+      "city": "Oakland",
+      "timezone": "America/Los_Angeles"
+    },
+    {
+      "id": "apt-msy",
+      "code": "MSY",
+      "name": "Louis Armstrong New Orleans International",
+      "city": "New Orleans",
+      "timezone": "America/Chicago"
+    },
+    {
+      "id": "apt-cle",
+      "code": "CLE",
+      "name": "Cleveland Hopkins International",
+      "city": "Cleveland",
+      "timezone": "America/New_York"
+    },
+    {
+      "id": "apt-pit",
+      "code": "PIT",
+      "name": "Pittsburgh International",
+      "city": "Pittsburgh",
+      "timezone": "America/New_York"
+    },
+    {
+      "id": "apt-sjc",
+      "code": "SJC",
+      "name": "San Jose International",
+      "city": "San Jose",
+      "timezone": "America/Los_Angeles"
+    },
+    {
+      "id": "apt-sat",
+      "code": "SAT",
+      "name": "San Antonio International",
+      "city": "San Antonio",
+      "timezone": "America/Chicago"
+    },
+    {
+      "id": "apt-rsw",
+      "code": "RSW",
+      "name": "Southwest Florida International",
+      "city": "Fort Myers",
+      "timezone": "America/New_York"
+    },
+    {
+      "id": "apt-iad",
+      "code": "IAD",
+      "name": "Washington Dulles International",
+      "city": "Dulles",
+      "timezone": "America/New_York"
+    },
+    {
+      "id": "apt-sna",
+      "code": "SNA",
+      "name": "John Wayne",
+      "city": "Santa Ana",
+      "timezone": "America/Los_Angeles"
+    },
+    {
+      "id": "apt-mke",
+      "code": "MKE",
+      "name": "General Mitchell International",
+      "city": "Milwaukee",
+      "timezone": "America/Chicago"
+    },
+    {
+      "id": "apt-pbi",
+      "code": "PBI",
+      "name": "Palm Beach International",
+      "city": "West Palm Beach",
+      "timezone": "America/New_York"
+    },
+    {
+      "id": "apt-ric",
+      "code": "RIC",
+      "name": "Richmond International",
+      "city": "Richmond",
+      "timezone": "America/New_York"
+    },
+    {
+      "id": "apt-buf",
+      "code": "BUF",
+      "name": "Buffalo Niagara International",
+      "city": "Buffalo",
+      "timezone": "America/New_York"
+    },
+    {
+      "id": "apt-ont",
+      "code": "ONT",
+      "name": "Ontario International",
+      "city": "Ontario",
+      "timezone": "America/Los_Angeles"
+    }
+  ],
+  "checkpointsByAirport": {
+    "JFK": [
+      "Main",
+      "Terminal 1 Security",
+      "Terminal 4 Security",
+      "Terminal 5 Security",
+      "Terminal 8 Security"
+    ],
+    "SEA": [
+      "Main",
+      "North Checkpoint",
+      "South Checkpoint",
+      "D Checkpoint",
+      "E Checkpoint"
+    ],
+    "LAX": [
+      "Main",
+      "Terminal 1 Security",
+      "Terminal 4 Security",
+      "Tom Bradley Terminal Security",
+      "Terminal 5 Security"
+    ],
+    "ORD": [
+      "Main",
+      "Terminal 1 Security A",
+      "Terminal 3 Security A",
+      "Terminal 5 Security A",
+      "International Terminal Security"
+    ],
+    "SFO": [
+      "Main",
+      "Terminal 2 Security",
+      "Terminal 3 Security",
+      "International Terminal G",
+      "International Terminal A"
+    ],
+    "ATL": [
+      "Domestic North Checkpoint A",
+      "Domestic North Checkpoint B",
+      "Domestic South Checkpoint A",
+      "Domestic South Checkpoint B"
+    ],
+    "DFW": [
+      "Terminal A Security",
+      "Terminal B Security",
+      "Terminal C Security",
+      "Terminal E Security"
+    ],
+    "DEN": [
+      "West Security Checkpoint A",
+      "West Security Checkpoint B",
+      "South Security Checkpoint A",
+      "South Security Checkpoint B"
+    ],
+    "LAS": [
+      "Terminal 1 Security",
+      "Terminal 3 Security",
+      "Terminal 3 D Gates"
+    ],
+    "MCO": [
+      "Side A Security",
+      "Side B Security",
+      "Side C Security",
+      "Side D Security"
+    ],
+    "CLT": [
+      "Atrium A Security",
+      "Atrium B Security",
+      "Atrium C Security",
+      "Atrium D Security"
+    ],
+    "EWR": [
+      "Terminal A Security",
+      "Terminal B Security",
+      "Terminal C Security"
+    ],
+    "PHX": [
+      "Terminal 3 Security A",
+      "Terminal 3 Security B",
+      "Terminal 4 Security",
+      "Terminal 4 Security B"
+    ],
+    "MIA": [
+      "North Checkpoint",
+      "South Checkpoint",
+      "Central Lobby B"
+    ],
+    "IAH": [
+      "Terminal A Checkpoint",
+      "Terminal B Checkpoint",
+      "Terminal C Checkpoint",
+      "Terminal E Checkpoint"
+    ],
+    "BOS": [
+      "Terminal A Security",
+      "Terminal B Security",
+      "Terminal C Security",
+      "Terminal E Security"
+    ],
+    "MSP": [
+      "Terminal 1 Security",
+      "Terminal 2 Security",
+      "International Terminal G",
+      "International Terminal F"
+    ],
+    "DTW": [
+      "McNamara Terminal North Security",
+      "McNamara Terminal South Security",
+      "Evans Terminal Security",
+      "Smith Terminal Security"
+    ],
+    "FLL": [
+      "Terminal 3 South",
+      "Terminal 3 North",
+      "Terminal 4 Security"
+    ],
+    "PHL": [
+      "A-West Security",
+      "B Terminal Security",
+      "C Terminal Security",
+      "D Terminal Security"
+    ],
+    "BWI": [
+      "Checkpoint A",
+      "Checkpoint B",
+      "Checkpoint C"
+    ],
+    "DCA": [
+      "Terminal 2 Security",
+      "North Checkpoint",
+      "South Checkpoint"
+    ],
+    "MDW": [
+      "Midway Gate A Security",
+      "Midway Gate B Security",
+      "Midway Gate C Security"
+    ],
+    "TPA": [
+      "Checkpoint A",
+      "Checkpoint B",
+      "Checkpoint C",
+      "Checkpoint E"
+    ],
+    "SAN": [
+      "Terminal 1 Security",
+      "Terminal 2 Security"
+    ],
+    "SLC": [
+      "Concourse North",
+      "Concourse South",
+      "Concourse East",
+      "Concourse West"
+    ],
+    "PDX": [
+      "North Checkpoint",
+      "South Checkpoint",
+      "Center Checkpoint"
+    ],
+    "STL": [
+      "Terminal 1 Security",
+      "Terminal 2 Security"
+    ],
+    "CVG": [
+      "Checkpoint A",
+      "Checkpoint B",
+      "Main Checkpoint"
+    ],
+    "RDU": [
+      "Terminal 1 Security",
+      "Terminal 2 Security"
+    ],
+    "IND": [
+      "Checkpoint A",
+      "Checkpoint B",
+      "Checkpoint C"
+    ],
+    "AUS": [
+      "Checkpoint A",
+      "Checkpoint B",
+      "Checkpoint C"
+    ],
+    "DAL": [
+      "Checkpoint A",
+      "Checkpoint B"
+    ],
+    "BNA": [
+      "Checkpoint A",
+      "Checkpoint B",
+      "Checkpoint C"
+    ],
+    "SMF": [
+      "Checkpoint A",
+      "Checkpoint B"
+    ],
+    "MCI": [
+      "Checkpoint A",
+      "Checkpoint B",
+      "Checkpoint C"
+    ],
+    "HNL": [
+      "Checkpoint A",
+      "Checkpoint B",
+      "Checkpoint C"
+    ],
+    "OAK": [
+      "Terminal 1 Security",
+      "Terminal 2 Security"
+    ],
+    "MSY": [
+      "Checkpoint A",
+      "Checkpoint B",
+      "Checkpoint C"
+    ],
+    "CLE": [
+      "Checkpoint A",
+      "Checkpoint B",
+      "Checkpoint C"
+    ],
+    "PIT": [
+      "Checkpoint A",
+      "Checkpoint B",
+      "Checkpoint C"
+    ],
+    "SJC": [
+      "Checkpoint A",
+      "Checkpoint B"
+    ],
+    "SAT": [
+      "Checkpoint A",
+      "Checkpoint B"
+    ],
+    "RSW": [
+      "Checkpoint A",
+      "Checkpoint B"
+    ],
+    "IAD": [
+      "Checkpoint A",
+      "Checkpoint B",
+      "Checkpoint C",
+      "Checkpoint D",
+      "Main Checkpoint"
+    ],
+    "SNA": [
+      "Checkpoint A",
+      "Checkpoint B",
+      "Checkpoint C"
+    ],
+    "MKE": [
+      "Checkpoint A",
+      "Checkpoint B"
+    ],
+    "PBI": [
+      "Checkpoint A",
+      "Checkpoint B"
+    ],
+    "RIC": [
+      "Checkpoint A",
+      "Checkpoint B"
+    ],
+    "BUF": [
+      "Checkpoint A",
+      "Checkpoint B"
+    ],
+    "ONT": [
+      "Checkpoint A",
+      "Checkpoint B"
+    ]
+  }
+}
