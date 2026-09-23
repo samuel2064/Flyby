@@ -1,13 +1,17 @@
 import { formatRelativeTime } from '../hooks/useWaitTimes'
 import type { WaitTime } from '../api/types'
+import type { ForecastBestHour } from '../lib/forecastChip'
 import { WaitBadge } from './WaitBadge'
+import { BestTimeChip } from './BestTimeChip'
 
 interface CheckpointCardProps {
   waitTime: WaitTime
   onReport: (checkpoint: string) => void
+  best?: ForecastBestHour
+  bestLoading: boolean
 }
 
-export function CheckpointCard({ waitTime, onReport }: CheckpointCardProps) {
+export function CheckpointCard({ waitTime, onReport, best, bestLoading }: CheckpointCardProps) {
   return (
     <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -16,6 +20,7 @@ export function CheckpointCard({ waitTime, onReport }: CheckpointCardProps) {
           <p className="mt-0.5 text-xs text-slate-500">
             Updated {formatRelativeTime(waitTime.updatedAt)}
           </p>
+          <BestTimeChip best={best} loading={bestLoading} />
         </div>
         <WaitBadge waitMinutes={waitTime.waitMinutes} />
       </div>

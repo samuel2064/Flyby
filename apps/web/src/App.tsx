@@ -1,6 +1,8 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { DEFAULT_AIRPORT, type Airport } from './data/airports'
 import { useWaitTimes, formatRelativeTime } from './hooks/useWaitTimes'
+import { useForecasts } from './hooks/useForecasts'
+import { buildBestByCheckpoint } from './lib/forecastChip'
 import { AirportSearch } from './components/AirportSearch'
 import { CheckpointCard } from './components/CheckpointCard'
 import { ReportSheet } from './components/ReportSheet'
@@ -10,6 +12,11 @@ export default function App() {
   const [airport, setAirport] = useState<Airport>(DEFAULT_AIRPORT)
   const [reportCheckpoint, setReportCheckpoint] = useState<string | null>(null)
   const { waitTimes, state, lastUpdated, live, refresh } = useWaitTimes(airport.code)
+  const { forecasts, loading: forecastsLoading } = useForecasts(airport.code, lastUpdated)
+  const bestByCheckpoint = useMemo(
+    () => buildBestByCheckpoint(forecasts),
+    [forecasts],
+  )
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -99,6 +106,8 @@ export default function App() {
                   key={`${waitTime.checkpoint}-${waitTime.updatedAt}`}
                   waitTime={waitTime}
                   onReport={setReportCheckpoint}
+                  best={bestByCheckpoint.bestFor(waitTime.checkpoint)}
+                  bestLoading={forecastsLoading}
                 />
               ))}
             {state === 'ready' && waitTimes.length === 0 && (

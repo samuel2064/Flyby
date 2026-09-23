@@ -68,3 +68,36 @@ jobs:
           echo "OK    DELETE /api/reports/rpt_0 -> $code (TIR-299 route present, auth enforced)"
 
           echo "All live smoke checks passed"
+
+  live-web-smoke:
+    name: Live web smoke
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probe the deployed PWA (retries tolerate Render cold starts)
+        run: |
+          set -uo pipefail
+          fail() { echo "::error::$1"; exit 1; }
+
+          probe() {
+            local path="$1" grep_pattern="$2"
+            local attempt=1 code=000
+            while [ $attempt -le 3 ]; do
+              code=$(curl -s -o /tmp/web.html -w '%{http_code}' --max-time 90 "https://flyby-web.onrender.com$path" || echo 000)
+              if [ "$code" = "200" ] && grep -q "$grep_pattern" /tmp/web.html; then
+                echo "OK    $path -> 200 (attempt $attempt)"
+                return 0
+              fi
+              echo "RETRY $path -> HTTP $code (attempt $attempt)"
+              attempt=$((attempt+1))
+              sleep 45
+            done
+            echo "Response body on final failure:"
+            head -c 500 /tmp/web.html || true
+            fail "Live web smoke check FAILED for $path after 3 attempts (last HTTP $code)"
+          }
+
+          probe "/" 'id="root"'
+          # SPA rewrite: deep links must serve the app shell (200), not a 404
+          probe "/airports/JFK" 'id="root"'
+
+          echo "All live web smoke checks passed"
