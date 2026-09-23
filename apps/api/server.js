@@ -748,11 +748,11 @@ app.post('/api/notifications/test', triggerHandler);
 // frontend describe the same supported airports.
 
 const AIRPORTS = [
-  { id: 'apt-jfk', code: 'JFK', name: 'John F. Kennedy International', city: 'New York' },
-  { id: 'apt-sea', code: 'SEA', name: 'Seattle-Tacoma International', city: 'Seattle' },
-  { id: 'apt-lax', code: 'LAX', name: 'Los Angeles International', city: 'Los Angeles' },
-  { id: 'apt-ord', code: 'ORD', name: "O'Hare International", city: 'Chicago' },
-  { id: 'apt-sfo', code: 'SFO', name: 'San Francisco International', city: 'San Francisco' },
+  { id: 'apt-jfk', code: 'JFK', name: 'John F. Kennedy International', city: 'New York', timezone: 'America/New_York' },
+  { id: 'apt-sea', code: 'SEA', name: 'Seattle-Tacoma International', city: 'Seattle', timezone: 'America/Los_Angeles' },
+  { id: 'apt-lax', code: 'LAX', name: 'Los Angeles International', city: 'Los Angeles', timezone: 'America/Los_Angeles' },
+  { id: 'apt-ord', code: 'ORD', name: "O'Hare International", city: 'Chicago', timezone: 'America/Chicago' },
+  { id: 'apt-sfo', code: 'SFO', name: 'San Francisco International', city: 'San Francisco', timezone: 'America/Los_Angeles' },
 ];
 
 const CHECKPOINTS_BY_AIRPORT = {
@@ -846,6 +846,313 @@ app.get('/api/checkpoints', (req, res) => {
   });
 });
 
+// --- Pattern-based wait-time forecasts (TIR-300) ------------------------------
+// Port of the monorepo computeForecast core (packages/api/src/checkpoints.ts):
+// hour-of-day pattern matching over the last `days` days of reports, bucketed
+// in the airport's local timezone, with live crowd-consensus blending of the
+// two imminent slots (60% live + 40% pattern for the current hour, 30% + 70%
+// for the next; pure pattern from the third upcoming hour). Checkpoints with
+// no reports return empty predictions/bestHours - never fabricated values
+// (same trust principle as the TIR-298 fix).
+
+function localHourFormatter(timezone) {
+  try {
+    return new Intl.DateTimeFormat('en-US', { timeZone: timezone || 'UTC', hour: 'numeric', hour12: false });
+  } catch {
+    return new Intl.DateTimeFormat('en-US', { hour: 'numeric', hour12: false });
+  }
+}
+
+function localHourOf(date, fmt) {
+  const parts = fmt.formatToParts(date);
+  const hourPart = parts.find((p) => p.type === 'hour');
+  let hour = hourPart ? parseInt(hourPart.value, 10) : date.getUTCHours();
+  if (hour === 24) hour = 0; // "24" can appear in some environments for midnight
+  if (isNaN(hour) || hour < 0 || hour > 23) hour = date.getUTCHours();
+  return hour;
+}
+
+// Recency-weighted consensus over reports from the last 6 hours, or null.
+function computeConsensusMinutes(waitTimes) {
+  if (!waitTimes || waitTimes.length === 0) return null;
+  const nowMs = Date.now();
+  const recent = waitTimes.filter(
+    (wt) => (nowMs - new Date(wt.reportedAt).getTime()) / (1000 * 60 * 60) <= 6
+  );
+  if (recent.length === 0) return null;
+  let totalWeight = 0;
+  let weightedSum = 0;
+  for (const wt of recent) {
+    const ageHours = (nowMs - new Date(wt.reportedAt).getTime()) / (1000 * 60 * 60);
+    const weight = 1 / (ageHours + 0.1);
+    totalWeight += weight;
+    weightedSum += wt.minutes * weight;
+  }
+  return Math.round(weightedSum / totalWeight);
+}
+
+// Bounded integer query parameter; error text matches the monorepo validators.
+function parseBoundedInt(raw, fallback, min, max, label) {
+  if (raw === undefined || raw === null) return { valid: true, value: fallback };
+  if (typeof raw !== 'string' || raw.trim().length === 0) {
+    return { valid: false, error: `${label} must be a positive integer between ${min} and ${max}` };
+  }
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed < min || parsed > max) {
+    return { valid: false, error: `${label} must be a positive integer between ${min} and ${max}` };
+  }
+  return { valid: true, value: parsed };
+}
+
+// Shared forecast core. Both the single-checkpoint predict endpoint and the
+// per-airport batch endpoint call this, so batch and single results can never
+// diverge (same invariant as the monorepo, proven by its predict-parity test).
+function computeForecast(timezone, waitTimes, horizon) {
+  const tz = timezone || 'UTC';
+  const fmt = localHourFormatter(tz);
+  const sampleCount = waitTimes.length;
+
+  const currentConsensusMinutes = computeConsensusMinutes(waitTimes);
+
+  // Live consensus: recency-weighted consensus over the last 60 minutes only -
+  // the freshest crowd signal, blended into the imminent slots below.
+  const LIVE_WINDOW_MS = 60 * 60 * 1000;
+  const nowMs = Date.now();
+  const isLive = (wt) => nowMs - new Date(wt.reportedAt).getTime() <= LIVE_WINDOW_MS;
+  const liveReports = waitTimes.filter((wt) => isLive(wt));
+  const liveConsensusMinutes = computeConsensusMinutes(liveReports);
+
+  if (sampleCount === 0) {
+    return {
+      timezone: tz,
+      sampleCount: 0,
+      overallAverageMinutes: null,
+      currentConsensusMinutes,
+      liveConsensusMinutes,
+      predictions: [],
+      bestHours: [],
+    };
+  }
+
+  // Average wait per local hour-of-day. Live-window reports are excluded: the
+  // live signal is blended separately, so it must not double-count into the
+  // historical baseline for its hour.
+  const hourMap = new Map();
+  for (const wt of waitTimes) {
+    if (isLive(wt)) continue;
+    const hour = localHourOf(new Date(wt.reportedAt), fmt);
+    const bucket = hourMap.get(hour);
+    if (bucket) {
+      bucket.count += 1;
+      bucket.sum += wt.minutes;
+    } else {
+      hourMap.set(hour, { count: 1, sum: wt.minutes });
+    }
+  }
+
+  const totalSum = waitTimes.reduce((s, wt) => s + wt.minutes, 0);
+  const overallAverageMinutes = Math.round((totalSum / sampleCount) * 10) / 10;
+  const overallConfidence = Math.min(1, sampleCount / 10);
+
+  // Slot i covers the i-th upcoming local hour.
+  const currentHour = localHourOf(new Date(), fmt);
+  const currentSlotStart = Math.floor(Date.now() / (60 * 60 * 1000)) * 60 * 60 * 1000;
+
+  const liveBlendWeights = [0.6, 0.3];
+  const liveSampleCount = liveReports.length;
+
+  const predictions = [];
+  for (let i = 0; i < horizon; i++) {
+    const hour = (currentHour + i) % 24;
+    const forecastFor = new Date(currentSlotStart + i * 60 * 60 * 1000).toISOString();
+    const bucket = hourMap.get(hour);
+
+    const patternMinutes = bucket ? bucket.sum / bucket.count : overallAverageMinutes;
+    const patternSampleCount = bucket ? bucket.count : 0;
+
+    const liveWeight =
+      liveConsensusMinutes !== null && i < liveBlendWeights.length ? liveBlendWeights[i] : 0;
+
+    if (liveWeight > 0) {
+      predictions.push({
+        hour,
+        forecastFor,
+        predictedMinutes: Math.round(
+          liveWeight * liveConsensusMinutes + (1 - liveWeight) * patternMinutes
+        ),
+        // Evidence pool: hour-of-day history depth plus live corroboration.
+        confidence:
+          Math.round(Math.min(1, (patternSampleCount + liveSampleCount) / 10) * 100) / 100,
+        sampleCount: patternSampleCount,
+        source: 'blended',
+      });
+    } else {
+      predictions.push({
+        hour,
+        forecastFor,
+        predictedMinutes: Math.round(patternMinutes),
+        confidence: bucket
+          ? Math.round(Math.min(1, bucket.count / 10) * 100) / 100
+          : Math.round(overallConfidence * 0.5 * 100) / 100,
+        sampleCount: patternSampleCount,
+        source: bucket ? 'pattern' : 'fallback',
+      });
+    }
+  }
+
+  // Best time to go: only hours backed by real pattern and/or live data,
+  // sorted by predicted wait.
+  const bestHours = predictions
+    .filter((p) => p.source !== 'fallback')
+    .sort((a, b) => a.predictedMinutes - b.predictedMinutes)
+    .slice(0, 3)
+    .map((p) => ({ hour: p.hour, forecastFor: p.forecastFor, predictedMinutes: p.predictedMinutes }));
+
+  return {
+    timezone: tz,
+    sampleCount,
+    overallAverageMinutes,
+    currentConsensusMinutes,
+    liveConsensusMinutes,
+    predictions,
+    bestHours,
+  };
+}
+
+// Stable checkpoint ids: ck-<airport>-<slug> (e.g. ck-jfk-main). Deterministic
+// stand-ins for the monorepo's checkpoint ids, so the predict contract
+// (/api/checkpoints/:id/predict) matches the monorepo surface.
+function checkpointIdFor(airportCode, name) {
+  const slug = String(name)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return `ck-${airportCode.toLowerCase()}-${slug}`;
+}
+
+const CHECKPOINT_ID_PATTERN = /^ck-[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
+function findCheckpointById(id) {
+  for (const a of AIRPORTS) {
+    for (const name of CHECKPOINTS_BY_AIRPORT[a.code] || []) {
+      if (checkpointIdFor(a.code, name) === id) return { airport: a, name };
+    }
+  }
+  return null;
+}
+
+// Shared horizon/days query validation. Sends the 400 itself on failure and
+// returns null so callers can bail; error text matches the monorepo.
+function forecastParams(req, res) {
+  const horizonResult = parseBoundedInt(req.query.horizon, 12, 1, 24, 'horizon');
+  if (!horizonResult.valid) {
+    res.status(400).json({ error: horizonResult.error });
+    return null;
+  }
+  const daysResult = parseBoundedInt(req.query.days, 30, 1, 30, 'days');
+  if (!daysResult.valid) {
+    res.status(400).json({ error: daysResult.error });
+    return null;
+  }
+  return { horizon: horizonResult.value, days: daysResult.value };
+}
+
+// GET /api/checkpoints/:id/predict - per-checkpoint pattern forecast with live
+// blending. Same response shape as the monorepo endpoint.
+app.get('/api/checkpoints/:id/predict', async (req, res) => {
+  const id = req.params.id;
+  if (typeof id !== 'string' || !CHECKPOINT_ID_PATTERN.test(id)) {
+    return res.status(400).json({ error: 'Invalid checkpoint id' });
+  }
+  const params = forecastParams(req, res);
+  if (!params) return;
+  const cp = findCheckpointById(id);
+  if (!cp) {
+    return res.status(404).json({ error: 'Checkpoint not found' });
+  }
+  const since = new Date(Date.now() - params.days * 24 * 60 * 60 * 1000);
+  let waitTimes = [];
+  if (db) {
+    try {
+      const rows = await db.waitTimeReport.findMany({
+        where: { airport: cp.airport.code, checkpoint: cp.name, createdAt: { gte: since } },
+        select: { waitMinutes: true, createdAt: true },
+      });
+      waitTimes = rows.map((r) => ({ minutes: r.waitMinutes, reportedAt: r.createdAt }));
+    } catch (err) {
+      // Never serve a fabricated forecast on a DB error.
+      console.error(`predict DB read failed: ${err.message}`);
+      return res.status(500).json({ error: 'Database unavailable' });
+    }
+  }
+  const core = computeForecast(cp.airport.timezone, waitTimes, params.horizon);
+  return res.json({
+    data: {
+      checkpointId: id,
+      airportCode: cp.airport.code,
+      airportName: cp.airport.name,
+      code: null,
+      name: cp.name,
+      terminal: null,
+      historyDays: params.days,
+      horizon: params.horizon,
+      ...core,
+    },
+  });
+});
+
+// GET /api/airports/:code/forecasts - batch pattern forecast for every
+// checkpoint at an airport in ONE call (powers the Airport page best-time
+// chips without N predict round trips). Checkpoints with no reports return
+// empty predictions/bestHours - no fabrication.
+app.get('/api/airports/:code/forecasts', async (req, res) => {
+  const code = String(req.params.code || '').trim().toUpperCase();
+  if (!/^[A-Z]{3}$/.test(code)) {
+    return res.status(400).json({ error: 'Invalid airport code. Must be a 3-letter IATA code.' });
+  }
+  const params = forecastParams(req, res);
+  if (!params) return;
+  const airport = AIRPORTS.find((a) => a.code === code);
+  if (!airport) {
+    return res.status(404).json({ error: 'Airport not found' });
+  }
+  const names = CHECKPOINTS_BY_AIRPORT[airport.code] || [];
+  const byCheckpoint = new Map(names.map((n) => [n, []]));
+  if (db && names.length > 0) {
+    const since = new Date(Date.now() - params.days * 24 * 60 * 60 * 1000);
+    try {
+      const rows = await db.waitTimeReport.findMany({
+        where: { airport: airport.code, createdAt: { gte: since } },
+        select: { checkpoint: true, waitMinutes: true, createdAt: true },
+      });
+      for (const r of rows) {
+        const list = byCheckpoint.get(r.checkpoint);
+        if (list) list.push({ minutes: r.waitMinutes, reportedAt: r.createdAt });
+      }
+    } catch (err) {
+      console.error(`forecasts DB read failed: ${err.message}`);
+      return res.status(500).json({ error: 'Database unavailable' });
+    }
+  }
+  const forecasts = names.map((name) => ({
+    checkpointId: checkpointIdFor(airport.code, name),
+    code: null,
+    name,
+    terminal: null,
+    ...computeForecast(airport.timezone, byCheckpoint.get(name) || [], params.horizon),
+  }));
+  return res.json({
+    data: {
+      airportCode: airport.code,
+      airportName: airport.name,
+      timezone: airport.timezone || 'UTC',
+      historyDays: params.days,
+      horizon: params.horizon,
+      forecasts,
+    },
+  });
+});
+
 // --- Basic operational metrics (TIR-287) -------------------------------------
 
 const startedAt = new Date();
@@ -897,3 +1204,8 @@ process.on('SIGTERM', () => {
 module.exports = app;
 // Exposed for the test suite: lets `node --test` close the listener cleanly.
 module.exports.httpServer = server;
+// Exposed for the test suite: forecast core unit tests (TIR-300) exercise the
+// hour-bucketing, blending, and best-hour math directly, without needing a DB.
+module.exports.computeForecast = computeForecast;
+module.exports.checkpointIdFor = checkpointIdFor;
+module.exports.findCheckpointById = findCheckpointById;

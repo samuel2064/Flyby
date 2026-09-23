@@ -40,6 +40,10 @@ jobs:
           probe "/api/airports" '"airports"'
           probe "/api/airports/JFK" '"code":"JFK"'
           probe "/api/checkpoints?airport=JFK" '"checkpoints"'
+          # TIR-300: forecast routes must exist in the deployed build. A live
+          # catch-all 404 {"error":"not_found"} means the build is stale.
+          probe "/api/airports/JFK/forecasts" '"airportCode":"JFK"'
+          probe "/api/checkpoints/ck-jfk-main/predict" '"checkpointId":"ck-jfk-main"'
 
           # TIR-298 live guard: unknown airports must return app-level 404,
           # never a fabricated wait-time record.

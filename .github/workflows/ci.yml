@@ -64,6 +64,30 @@ jobs:
             exit 1
           fi
           grep -q 'ADMIN_API_KEY' /tmp/del_unauth.json
+          # TIR-300: forecast endpoints must exist and honor the contract.
+          # This boot is in-memory mode (no DB): known airports answer 200 with
+          # EMPTY predictions (never fabricated), unknown airports 404.
+          curl -sf "http://127.0.0.1:3000/api/airports/JFK/forecasts" -o /tmp/fc_jfk.json
+          grep -q '"airportCode":"JFK"' /tmp/fc_jfk.json
+          grep -q '"checkpointId":"ck-jfk-main"' /tmp/fc_jfk.json
+          grep -q '"predictions":\[\]' /tmp/fc_jfk.json
+          curl -sf "http://127.0.0.1:3000/api/checkpoints/ck-jfk-main/predict" -o /tmp/pred_jfk.json
+          grep -q '"checkpointId":"ck-jfk-main"' /tmp/pred_jfk.json
+          grep -q '"predictions":\[\]' /tmp/pred_jfk.json
+          code=$(curl -s -o /tmp/fc_unknown.json -w '%{http_code}' "http://127.0.0.1:3000/api/airports/QQQ/forecasts")
+          if [ "$code" != "404" ]; then
+            echo "Expected 404 for unknown airport forecasts, got $code"
+            cat /tmp/fc_unknown.json
+            exit 1
+          fi
+          grep -q '"Airport not found"' /tmp/fc_unknown.json
+          code=$(curl -s -o /tmp/pred_unk.json -w '%{http_code}' "http://127.0.0.1:3000/api/checkpoints/ck-jfk-north/predict")
+          if [ "$code" != "404" ]; then
+            echo "Expected 404 for unknown checkpoint predict, got $code"
+            cat /tmp/pred_unk.json
+            exit 1
+          fi
+          grep -q '"Checkpoint not found"' /tmp/pred_unk.json
           echo "Mock endpoints OK"
 
       - name: Verify admin delete contract with a key configured (TIR-299)

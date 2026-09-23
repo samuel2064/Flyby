@@ -28,6 +28,34 @@ Supported airports: JFK, SEA, LAX, ORD, SFO (mirrors `apps/web/src/data/airports
 
 Unknown airport in `?airport=`/`?airportId=` returns `404 {"errors":[{field:"airport",message}]}`.
 
+## Forecasts (TIR-300)
+
+| Method | Path                            | Response |
+| ------ | ------------------------------- | -------- |
+| GET    | `/api/checkpoints/:id/predict`  | `200 {data:{checkpointId,airportCode,airportName,code,name,terminal,historyDays,horizon,timezone,sampleCount,overallAverageMinutes,currentConsensusMinutes,liveConsensusMinutes,predictions:[...],bestHours:[...]}}` |
+| GET    | `/api/airports/:code/forecasts` | `200 {data:{airportCode,airportName,timezone,historyDays,horizon,forecasts:[{checkpointId,code,name,terminal,timezone,sampleCount,overallAverageMinutes,currentConsensusMinutes,liveConsensusMinutes,predictions:[...],bestHours:[...]}]}}` — batched: one call forecasts every checkpoint at the airport |
+
+Both accept `?horizon=<1-24>` (default 12) and `?days=<1-30>` (default 30). Invalid values return
+`400 {"error":"<horizon\|days> must be a positive integer between <min> and <max>"}`.
+
+- Checkpoint ids are deterministic slugs `ck-<airport code>-<name>` (e.g. `ck-jfk-main`); the same
+  ids appear in the batch `forecasts` array. Malformed id → `400 {"error":"Invalid checkpoint id"}`;
+  unknown id → `404 {"error":"Checkpoint not found"}`. Invalid airport code format →
+  `400 {"error":"Invalid airport code. Must be a 3-letter IATA code."}`; unknown airport →
+  `404 {"error":"Airport not found"}`.
+- `predictions` covers the next `horizon` local hours: `{hour, forecastFor, predictedMinutes,
+  confidence, sampleCount, source}` where `source` is `pattern` (hour-of-day history), `fallback`
+  (no history for that hour — overall average at halved confidence), or `blended` (live
+  crowd-consensus mixed into the two imminent slots: 60% live + 40% pattern for the current hour,
+  30% + 70% for the next). Live-window reports never double-count into the pattern baseline.
+- `bestHours` is the top 3 upcoming hours backed by real pattern/live data, sorted by predicted
+  wait (best time to go).
+- Checkpoints with no reports in the window return `sampleCount: 0` with EMPTY
+  `predictions`/`bestHours` — values are never fabricated (TIR-298 trust principle).
+- DB read failures answer `500 {"error":"Database unavailable"}` — never a fabricated forecast.
+- Hour bucketing uses the airport's local timezone (`America/New_York` for JFK, etc.).
+
+
 ## Wait times
 
 | Method | Path                    | Response                                                                                       |

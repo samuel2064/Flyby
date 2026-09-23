@@ -3,14 +3,15 @@ export interface Airport {
   code: string
   name: string
   city: string
+  timezone: string
 }
 
 export const AIRPORTS: Airport[] = [
-  { id: 'apt-jfk', code: 'JFK', name: 'John F. Kennedy International', city: 'New York' },
-  { id: 'apt-sea', code: 'SEA', name: 'Seattle-Tacoma International', city: 'Seattle' },
-  { id: 'apt-lax', code: 'LAX', name: 'Los Angeles International', city: 'Los Angeles' },
-  { id: 'apt-ord', code: 'ORD', name: "O'Hare International", city: 'Chicago' },
-  { id: 'apt-sfo', code: 'SFO', name: 'San Francisco International', city: 'San Francisco' },
+  { id: 'apt-jfk', code: 'JFK', name: 'John F. Kennedy International', city: 'New York', timezone: 'America/New_York' },
+  { id: 'apt-sea', code: 'SEA', name: 'Seattle-Tacoma International', city: 'Seattle', timezone: 'America/Los_Angeles' },
+  { id: 'apt-lax', code: 'LAX', name: 'Los Angeles International', city: 'Los Angeles', timezone: 'America/Los_Angeles' },
+  { id: 'apt-ord', code: 'ORD', name: "O'Hare International", city: 'Chicago', timezone: 'America/Chicago' },
+  { id: 'apt-sfo', code: 'SFO', name: 'San Francisco International', city: 'San Francisco', timezone: 'America/Los_Angeles' },
 ]
 
 export const DEFAULT_AIRPORT = AIRPORTS[1]
