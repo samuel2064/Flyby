@@ -6,9 +6,11 @@
 
 delete process.env.DATABASE_URL; // force in-memory mode: deterministic, no DB
 process.env.PORT = '3787'; // dedicated test port; CI boot check uses 3000
+process.env.SSE_KEEPALIVE_MS = '250'; // make keepalive frames observable in tests
 
 const { test, after } = require('node:test');
 const assert = require('node:assert/strict');
+const http = require('node:http');
 
 const { httpServer, computeForecast, checkpointIdFor, findCheckpointById, bucketWaitHistory } =
   require('./server.js');
@@ -850,4 +852,136 @@ test('history endpoint validates the window and bucket query parameters', async 
   const okBody = await ok.json();
   assert.equal(okBody.data.windowHours, 6);
   assert.equal(okBody.data.bucketMinutes, 15);
+});
+
+// --- TIR-314 regression: SSE streams real reports only, never fabricated ----
+// Before TIR-314 the stream ticked out RANDOM wait-time updates. These tests
+// lock in: connect frame only until a real report lands; real reports reach
+// scoped clients with the exact payload; other airports stay silent; unscoped
+// clients receive everything; keepalive comments never surface as events.
+
+// Collects parsed data-frames (keepalive/comment frames excluded, exactly as
+// EventSource sees them). If predicate(ev) returns true the stream closes
+// early; otherwise collection ends after timeoutMs and resolves with events.
+function collectSseEvents(path, timeoutMs, predicate) {
+  return new Promise((resolve, reject) => {
+    const events = [];
+    let finished = false;
+    const done = () => { if (!finished) { finished = true; resolve(events); } };
+    const req = http.get(`${BASE}${path}`, (res) => {
+      assert.equal(res.statusCode, 200);
+      assert.equal(res.headers['content-type'], 'text/event-stream');
+      let buffer = '';
+      res.on('data', (chunk) => {
+        buffer += chunk.toString();
+        let idx;
+        while ((idx = buffer.indexOf('\n\n')) !== -1) {
+          const frame = buffer.slice(0, idx);
+          buffer = buffer.slice(idx + 2);
+          if (!frame.trim() || frame.startsWith(':')) continue; // keepalive
+          for (const line of frame.split('\n')) {
+            if (line.startsWith('data:')) {
+              const ev = JSON.parse(line.slice(5).trim());
+              events.push(ev);
+              if (predicate && predicate(ev)) { req.destroy(); return done(); }
+            }
+          }
+        }
+      });
+      res.on('end', done);
+      res.on('error', done);
+    });
+    req.on('error', (err) => (finished ? done() : reject(err)));
+    setTimeout(() => { req.destroy(); done(); }, timeoutMs).unref();
+  });
+}
+
+// Same loop but returns the raw text so keepalive comments can be asserted
+// (they keep the connection alive through proxies but must stay invisible to
+// event consumers).
+function collectSseRaw(path, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    let raw = '';
+    let finished = false;
+    const done = () => { if (!finished) { finished = true; resolve(raw); } };
+    const req = http.get(`${BASE}${path}`, (res) => {
+      res.on('data', (chunk) => { raw += chunk.toString(); });
+      res.on('end', done);
+      res.on('error', done);
+    });
+    req.on('error', (err) => (finished ? done() : reject(err)));
+    setTimeout(() => { req.destroy(); done(); }, timeoutMs).unref();
+  });
+}
+
+const postReport = (identity, report) =>
+  fetch(`${BASE}/api/wait-times`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-User-Id': identity },
+    body: JSON.stringify(report),
+  });
+
+test('SSE connect sends a connected frame and never fabricated wait-time events', async () => {
+  await ready;
+  // No reports are posted while this collection runs (serial suite, earlier
+  // POST tests are finished) - any wait-time-update here would be fabricated.
+  const events = await collectSseEvents('/api/events?airport=SEA', 700);
+  assert.ok(events.some((e) => e.type === 'connected'), 'expected a connected frame');
+  assert.equal(
+    events.filter((e) => e.type === 'wait-time-update').length,
+    0,
+    'stream must stay silent (no fabricated updates) until a real report lands',
+  );
+});
+
+test('a real report reaches scoped clients with the exact payload', async () => {
+  await ready;
+  const collected = collectSseEvents(
+    '/api/events?airport=SEA',
+    4000,
+    (ev) => ev.type === 'wait-time-update',
+  );
+  await new Promise((r) => setTimeout(r, 150)); // let the subscription register
+  const post = await postReport('sse-stream-test-1', { airport: 'SEA', checkpoint: 'Main', waitMinutes: 22 });
+  assert.equal(post.status, 201);
+  const events = await collected;
+  const update = events.find((e) => e.type === 'wait-time-update');
+  assert.ok(update, 'client must receive the broadcast');
+  assert.equal(update.airport, 'SEA');
+  assert.equal(update.checkpoint, 'Main');
+  assert.equal(update.waitMinutes, 22);
+  assert.ok(update.timestamp, 'broadcast carries the acceptance timestamp');
+});
+
+test("broadcasts are scoped: a client subscribed to another airport hears nothing", async () => {
+  await ready;
+  const collected = collectSseEvents('/api/events?airport=LAX', 900);
+  await new Promise((r) => setTimeout(r, 150));
+  const post = await postReport('sse-stream-test-2', { airport: 'JFK', checkpoint: 'Main', waitMinutes: 33 });
+  assert.equal(post.status, 201);
+  const events = await collected;
+  assert.equal(
+    events.filter((e) => e.type === 'wait-time-update').length,
+    0,
+    'an LAX subscriber must not receive JFK updates',
+  );
+});
+
+test('unscoped clients receive every airports broadcast', async () => {
+  await ready;
+  const collected = collectSseEvents('/api/events', 4000, (ev) => ev.type === 'wait-time-update');
+  await new Promise((r) => setTimeout(r, 150));
+  const post = await postReport('sse-stream-test-3', { airport: 'JFK', checkpoint: 'Main', waitMinutes: 14 });
+  assert.equal(post.status, 201);
+  const events = await collected;
+  const update = events.find((e) => e.type === 'wait-time-update');
+  assert.ok(update && update.airport === 'JFK');
+});
+
+test('keepalive comments arrive on the wire but stay invisible to event consumers', async () => {
+  await ready;
+  const raw = await collectSseRaw('/api/events?airport=SEA', 700);
+  assert.ok(raw.includes(': ping'), 'keepalive frames must keep Render idle-out away');
+  const events = await collectSseEvents('/api/events?airport=SEA', 700);
+  assert.ok(events.every((e) => e.type === 'connected'), 'keepalives parse as comments, not events');
 });
