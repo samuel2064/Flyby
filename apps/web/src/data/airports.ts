@@ -32,3 +32,11 @@ export function searchAirports(query: string): Airport[] {
 export function airportById(id: string): Airport | undefined {
   return AIRPORTS.find((a) => a.id === id || a.code === id.toUpperCase())
 }
+
+// Checkpoint names per airport, from the same shared file the API serves -
+// lets travelers report even when no card exists yet for a checkpoint.
+export const CHECKPOINTS_BY_AIRPORT: Record<string, string[]> = sharedData.checkpointsByAirport
+
+export function checkpointOptions(airportCode: string): string[] {
+  return CHECKPOINTS_BY_AIRPORT[(airportCode || '').trim().toUpperCase()] ?? []
+}

@@ -10,7 +10,9 @@ import { SkeletonCard } from './components/SkeletonCard'
 
 export default function App() {
   const [airport, setAirport] = useState<Airport>(DEFAULT_AIRPORT)
-  const [reportCheckpoint, setReportCheckpoint] = useState<string | null>(null)
+  // undefined = closed, null = picker mode (traveler picks the checkpoint),
+  // string = fixed checkpoint from a card.
+  const [reportTarget, setReportTarget] = useState<string | null | undefined>(undefined)
   const { waitTimes, state, lastUpdated, live, refresh } = useWaitTimes(airport.code)
   const { forecasts, loading: forecastsLoading } = useForecasts(airport.code, lastUpdated)
   const bestByCheckpoint = useMemo(
@@ -71,8 +73,17 @@ export default function App() {
                   >
                     Refresh
                   </button>
+                  {' · '}
                 </>
               )}
+              <button
+                type="button"
+                data-testid="report-button"
+                onClick={() => setReportTarget(null)}
+                className="font-semibold text-brand-700 hover:underline focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+              >
+                Report a wait time
+              </button>
             </p>
           </div>
 
@@ -105,7 +116,7 @@ export default function App() {
                 <CheckpointCard
                   key={`${waitTime.checkpoint}-${waitTime.updatedAt}`}
                   waitTime={waitTime}
-                  onReport={setReportCheckpoint}
+                  onReport={setReportTarget}
                   best={bestByCheckpoint.bestFor(waitTime.checkpoint)}
                   bestLoading={forecastsLoading}
                 />
@@ -116,6 +127,14 @@ export default function App() {
                   No checkpoints reported at {airport.code} yet.
                 </p>
                 <p className="mt-1 text-xs text-slate-500">Be the first to report a wait time.</p>
+                <button
+                  type="button"
+                  data-testid="empty-report-button"
+                  onClick={() => setReportTarget(null)}
+                  className="mt-4 inline-flex h-10 items-center justify-center rounded-xl bg-brand-500 px-4 text-sm font-semibold text-white transition hover:bg-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+                >
+                  Report a wait time
+                </button>
               </div>
             )}
           </div>
@@ -127,10 +146,10 @@ export default function App() {
       </main>
 
       <ReportSheet
-        open={reportCheckpoint !== null}
+        open={reportTarget !== undefined}
         airportCode={airport.code}
-        checkpoint={reportCheckpoint ?? ''}
-        onClose={() => setReportCheckpoint(null)}
+        checkpoint={reportTarget ?? undefined}
+        onClose={() => setReportTarget(undefined)}
         onReported={refresh}
       />
     </div>
