@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { AIRPORTS, DEFAULT_AIRPORT, searchAirports, airportById, type Airport } from './airports'
+import { AIRPORTS, DEFAULT_AIRPORT, searchAirports, airportById, checkpointOptions, type Airport } from './airports'
 import importedData from '../../../../data/airports.json'
 
 // resolveJsonModule gives the data a literal-keyed type; widen it for indexing.
@@ -60,5 +60,24 @@ describe('shared airport data (TIR-313: 51-airport expansion)', () => {
     for (const code of ['JFK', 'SEA', 'LAX', 'ORD', 'SFO']) {
       expect(sharedData.checkpointsByAirport[code][0]).toBe('Main')
     }
+  })
+
+  it('checkpointOptions returns the real checkpoint list for any supported airport', () => {
+    const atl = checkpointOptions('ATL')
+    expect(atl.length).toBeGreaterThanOrEqual(4)
+    expect(atl).toContain('Domestic North Checkpoint A')
+    expect(checkpointOptions('JFK')[0]).toBe('Main')
+    expect(checkpointOptions('JFK')).toContain('Terminal 4 Security')
+  })
+
+  it('checkpointOptions is case-insensitive and trims input', () => {
+    expect(checkpointOptions('atl')).toEqual(checkpointOptions('ATL'))
+    expect(checkpointOptions(' atl ')).toEqual(checkpointOptions('ATL'))
+  })
+
+  it('checkpointOptions never throws and returns [] for unknown airports', () => {
+    expect(checkpointOptions('')).toEqual([])
+    expect(checkpointOptions('YYY')).toEqual([])
+    expect(checkpointOptions(undefined as unknown as string)).toEqual([])
   })
 })
