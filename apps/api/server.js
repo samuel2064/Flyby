@@ -417,6 +417,19 @@ function flatSubscription(record) {
   };
 }
 
+// TIR-309: PUBLIC list responses must not expose raw endpoint URLs or userIds
+// (privacy/spam vector: FCM endpoints + user identity publicly enumerable).
+// Only non-identifying metadata is returned on list endpoints.
+function redactedSubscription(record) {
+  return {
+    id: record.id,
+    airportId: record.airportId,
+    airportCode: record.airportCode,
+    createdAt: record.createdAt instanceof Date ? record.createdAt.toISOString() : record.createdAt,
+    updatedAt: record.updatedAt instanceof Date ? record.updatedAt.toISOString() : record.updatedAt,
+  };
+}
+
 const subscribeHandler = async (req, res) => {
   const body = req.body && req.body.subscription ? req.body.subscription : req.body || {};
   const { endpoint, p256dh, auth, airportId, userId } = body;
@@ -565,13 +578,13 @@ const listHandler = async (req, res) => {
       const rows = await db.notificationSubscription.findMany({
         orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
       });
-      return res.json({ subscriptions: rows.map(flatSubscription) });
+      return res.json({ subscriptions: rows.map(redactedSubscription) });
     } catch (err) {
       console.warn(`list DB fallback: ${err.message}`);
     }
   }
   res.json({
-    subscriptions: Array.from(subscriptions.values()).map(({ p256dh, auth, ...flat }) => flat),
+    subscriptions: Array.from(subscriptions.values()).map(redactedSubscription),
   });
 };
 app.get('/api/notifications/subscriptions', listHandler);
@@ -752,7 +765,7 @@ app.get('/api/notifications/:userId', async (req, res) => {
         skip: start,
         take: pageSize,
       });
-      return res.json({ subscriptions: rows.map(flatSubscription), total, page, pageSize });
+      return res.json({ subscriptions: rows.map(redactedSubscription), total, page, pageSize });
     } catch (err) {
       console.warn(`user list DB fallback: ${err.message}`);
     }
@@ -760,7 +773,7 @@ app.get('/api/notifications/:userId', async (req, res) => {
   const userSub = Array.from(subscriptions.values()).filter((s) => s.userId === req.params.userId);
   const items = userSub
     .slice(start, start + pageSize)
-    .map(({ p256dh, auth, ...flat }) => flat);
+    .map(redactedSubscription);
   res.json({ subscriptions: items, total: userSub.length, page, pageSize });
 });
 
