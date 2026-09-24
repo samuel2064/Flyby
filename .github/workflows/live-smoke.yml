@@ -133,14 +133,10 @@ jobs:
         with:
           node-version: 22
       - name: Install web deps
-        run: |
-          for attempt in 1 2; do
-            npm ci --prefix apps/web --no-audit --no-fund && exit 0
-            echo "npm ci attempt $attempt failed (transient registry/network); retrying in 30s"
-            sleep 30
-          done
-          exit 1
-
+        # Same pattern as ci.yml's web job: npm ci wants its lockfile in the
+        # working directory; bare `--prefix` breaks on runners without one.
+        working-directory: apps/web
+        run: npm ci --no-audit --no-fund || npm install --no-audit --no-fund
       - name: Install Playwright chromium
         run: npx playwright install --with-deps chromium
         working-directory: apps/web
