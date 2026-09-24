@@ -1069,3 +1069,85 @@ test('per-user list (GET /api/notifications/:userId) is redacted and does not le
     for (const key of SECRET_KEYS) assert.equal(row[key], undefined);
   }
 });
+
+// --- Subscription delete aliases: same guarded handler everywhere --------------
+// The alias routes used a mock handler that claimed success without deleting
+// anything (DB untouched, in-memory only-if-present, no 404, no ownership
+// check). The aliases must behave identically to DELETE /api/notifications/:id.
+
+test('alias DELETE of an unknown id returns 404, not a fabricated success', async () => {
+  await ready;
+  for (const path of ['/api/subscriptions', '/api/push/subscriptions', '/api/notifications/subscriptions']) {
+    const res = await fetch(`${BASE}${path}/sub_does_not_exist`, { method: 'DELETE' });
+    assert.equal(res.status, 404, `${path} unknown id`);
+    assert.deepEqual(await res.json(), { error: 'not_found', id: 'sub_does_not_exist' });
+  }
+});
+
+test('alias DELETE actually removes the record', async () => {
+  await ready;
+  await fetch(`${BASE}/api/subscriptions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      endpoint: 'https://fcm.googleapis.com/fcm/send/alias-delete-test',
+      p256dh: 'BK_alias',
+      auth: 'auth_alias',
+      airportId: 'apt-ord',
+      userId: 'alias-delete-user',
+    }),
+  });
+  const before = await fetch(`${BASE}/api/notifications/alias-delete-user`);
+  const beforeBody = await before.json();
+  const created = beforeBody.subscriptions.find((s) => s.airportCode === 'ORD');
+  assert.ok(created, 'record created');
+
+  const del = await fetch(`${BASE}/api/subscriptions/${created.id}`, { method: 'DELETE' });
+  assert.equal(del.status, 200);
+  assert.deepEqual(await del.json(), { success: true, id: created.id });
+
+  const after = await fetch(`${BASE}/api/notifications/alias-delete-user`);
+  const afterBody = await after.json();
+  assert.ok(!afterBody.subscriptions.some((s) => s.id === created.id), 'record is gone, not merely reported gone');
+
+  const again = await fetch(`${BASE}/api/subscriptions/${created.id}`, { method: 'DELETE' });
+  assert.equal(again.status, 404, 'second delete is a truthful 404, not success');
+});
+
+test('alias DELETE enforces the ownership guard on mismatched X-User-Id', async () => {
+  await ready;
+  await fetch(`${BASE}/api/subscriptions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      endpoint: 'https://fcm.googleapis.com/fcm/send/alias-guard-test',
+      p256dh: 'BK_guard',
+      auth: 'auth_guard',
+      airportId: 'apt-jfk',
+      userId: 'alias-guard-owner',
+    }),
+  });
+  const list = await fetch(`${BASE}/api/notifications/alias-guard-owner`);
+  const created = (await list.json()).subscriptions.find((s) => s.airportCode === 'JFK');
+  assert.ok(created, 'record created');
+
+  const forbiddenDel = await fetch(`${BASE}/api/push/subscriptions/${created.id}`, {
+    method: 'DELETE',
+    headers: { 'X-User-Id': 'alias-guard-attacker' },
+  });
+  assert.equal(forbiddenDel.status, 403);
+  assert.deepEqual(await forbiddenDel.json(), {
+    error: 'forbidden',
+    message: "Cannot delete another user's subscription",
+  });
+
+  const stillThere = await fetch(`${BASE}/api/notifications/alias-guard-owner`);
+  assert.ok((await stillThere.json()).subscriptions.some((s) => s.id === created.id));
+
+  // cleanup by the owner (canonical behavior also reachable on the aliases)
+  const okDel = await fetch(`${BASE}/api/push/subscriptions/${created.id}`, {
+    method: 'DELETE',
+    headers: { 'X-User-Id': 'alias-guard-owner' },
+  });
+  assert.equal(okDel.status, 200);
+});

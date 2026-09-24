@@ -624,15 +624,13 @@ const deleteByIdHandler = async (req, res) => {
 };
 app.delete('/api/notifications/:id', deleteByIdHandler);
 
-// Delete subscription (alias paths)
-const deleteHandler = (req, res) => {
-  const id = req.params.id;
-  subscriptions.delete(id);
-  res.json({ success: true, id });
-};
-app.delete('/api/notifications/subscriptions/:id', deleteHandler);
-app.delete('/api/push/subscriptions/:id', deleteHandler);
-app.delete('/api/subscriptions/:id', deleteHandler);
+// Delete subscription (alias paths) - all deletion routes flow through the
+// canonical guarded handler: the mock handler that used to live here claimed
+// {success:true} for anything, never deleted the persisted record (pushes kept
+// firing for 'deleted' subs), and skipped the ownership check entirely.
+app.delete('/api/notifications/subscriptions/:id', deleteByIdHandler);
+app.delete('/api/push/subscriptions/:id', deleteByIdHandler);
+app.delete('/api/subscriptions/:id', deleteByIdHandler);
 
 // Preferences (get + update) - process-local, not persistence-critical
 const prefs = { enabled: true, airports: [], minWaitChange: 5 };
