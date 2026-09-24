@@ -122,3 +122,18 @@ jobs:
           probe "/airports/JFK" 'id="root"'
 
           echo "All live web smoke checks passed"
+
+      # TIR-319: browser-level DOM smoke for the deployed PWA. Status-code
+      # probes cannot see stale bundles, JS runtime errors, or states that
+      # never resolve - the TIR-312 duplicate-cards defect was only ever
+      # caught by hand. Playwright now does it on every tick.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install web deps
+        run: npm ci --prefix apps/web
+      - name: Install Playwright chromium
+        run: npx playwright install --with-deps chromium
+        working-directory: apps/web
+      - name: Live DOM smoke
+        run: node apps/web/scripts/live-web-smoke.mjs
