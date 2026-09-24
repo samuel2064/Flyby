@@ -404,7 +404,9 @@ function isValidUrl(s) {
   try { const u = new URL(s); return u.protocol === 'https:' || u.protocol === 'http:'; } catch { return false; }
 }
 
-// FLAT response contract: no secrets, ISO timestamps.
+// FLAT response contract (TIR-294/TIR-309): subscribe ECHO responses only.
+// The caller just supplied these values on subscribe, so echoing them back is
+// not a disclosure; push keys p256dh/auth are never echoed anywhere.
 function flatSubscription(record) {
   return {
     id: record.id,
@@ -417,9 +419,11 @@ function flatSubscription(record) {
   };
 }
 
-// TIR-309: PUBLIC list responses must not expose raw endpoint URLs or userIds
-// (privacy/spam vector: FCM endpoints + user identity publicly enumerable).
-// Only non-identifying metadata is returned on list endpoints.
+// TIR-309: PUBLIC LIST responses (GET /api/subscriptions and aliases,
+// GET /api/notifications/:userId) must not expose raw endpoints or userIds -
+// an FCM endpoint is a bearer credential and userId is correlatable PII.
+// Lists return only non-identifying metadata; the QA fixture (sub-001) stays
+// discoverable by id/airport.
 function redactedSubscription(record) {
   return {
     id: record.id,
@@ -500,8 +504,7 @@ const subscribeHandler = async (req, res) => {
   if (record) {
     Object.assign(record, { p256dh, auth, userId: effectiveUserId });
     record.updatedAt = new Date().toISOString();
-    const { p256dh: _k1, auth: _k2, ...flat } = record;
-    return res.status(200).json(flat);
+    return res.status(200).json(flatSubscription(record));
   }
 
   const userCount = Array.from(subscriptions.values()).filter((s) => s.userId === effectiveUserId).length;
@@ -521,8 +524,7 @@ const subscribeHandler = async (req, res) => {
     updatedAt: new Date().toISOString(),
   };
   subscriptions.set(record.id, record);
-  const { p256dh: _k1, auth: _k2, ...flat } = record;
-  res.status(201).json(flat);
+  return res.status(201).json(flatSubscription(record));
 };
 
 // Seed record used by the QA contract (delete-403 and trigger happy paths).

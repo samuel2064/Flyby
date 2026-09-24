@@ -985,3 +985,87 @@ test('keepalive comments arrive on the wire but stay invisible to event consumer
   const events = await collectSseEvents('/api/events?airport=SEA', 700);
   assert.ok(events.every((e) => e.type === 'connected'), 'keepalives parse as comments, not events');
 });
+
+// --- TIR-309: subscription redaction must never lapse -------------------------
+// An FCM endpoint is a bearer credential; userId is correlatable PII. Every
+// public subscription path is guarded here so the TIR-294 redaction cannot
+// partially lapse again (today it leaked via flatSubscription on the DB path).
+
+const SECRET_KEYS = ['endpoint', 'userId', 'p256dh', 'auth'];
+
+test('GET /api/subscriptions returns only redacted records', async () => {
+  await ready;
+  const res = await fetch(`${BASE}/api/subscriptions`);
+  assert.equal(res.status, 200);
+  const rows = (await res.json()).subscriptions;
+  assert.ok(rows.length >= 1); // seeded QA fixture remains visible
+  for (const row of rows) {
+    for (const key of SECRET_KEYS) {
+      assert.equal(row[key], undefined, `subscription record must not expose ${key}`);
+    }
+    assert.ok(row.id && row.airportCode);
+  }
+  assert.ok(rows.some((r) => r.id === 'sub-001' && r.airportCode === 'JFK'));
+});
+
+test('GET /api/notifications/subscriptions alias is equally redacted', async () => {
+  await ready;
+  const res = await fetch(`${BASE}/api/notifications/subscriptions`);
+  assert.equal(res.status, 200);
+  for (const row of (await res.json()).subscriptions) {
+    for (const key of SECRET_KEYS) assert.equal(row[key], undefined);
+  }
+});
+
+test('POST /api/subscriptions 201 echo returns the caller-supplied endpoint but never the push keys', async () => {
+  await ready;
+  // Design (c8871f8): the subscribe echo returns the flat record with the
+  // endpoint the caller just supplied. Secrets p256dh/auth are never echoed.
+  const res = await fetch(`${BASE}/api/subscriptions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      endpoint: 'https://fcm.googleapis.com/fcm/send/secret-echo-test-1',
+      p256dh: 'BK_echo_secret',
+      auth: 'auth_echo_secret',
+      airportId: 'apt-sea',
+      userId: 'redaction-test-user',
+    }),
+  });
+  assert.equal(res.status, 201);
+  const body = await res.json();
+  assert.equal(body.p256dh, undefined, '201 echo must not include p256dh');
+  assert.equal(body.auth, undefined, '201 echo must not include auth');
+  assert.ok(body.id && body.airportCode === 'SEA');
+  assert.equal(body.endpoint, 'https://fcm.googleapis.com/fcm/send/secret-echo-test-1');
+});
+
+test('POST /api/subscriptions idempotent update (200) strips keys the same way', async () => {
+  await ready;
+  const res = await fetch(`${BASE}/api/subscriptions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      endpoint: 'https://fcm.googleapis.com/fcm/send/secret-echo-test-1',
+      p256dh: 'BK_echo_secret_2',
+      auth: 'auth_echo_secret_2',
+      airportId: 'apt-sea',
+      userId: 'redaction-test-user',
+    }),
+  });
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.p256dh, undefined, '200 echo must not include p256dh');
+  assert.equal(body.auth, undefined, '200 echo must not include auth');
+});
+
+test('per-user list (GET /api/notifications/:userId) is redacted and does not leak other users', async () => {
+  await ready;
+  const res = await fetch(`${BASE}/api/notifications/redaction-test-user`);
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.ok(body.subscriptions.length >= 1);
+  for (const row of body.subscriptions) {
+    for (const key of SECRET_KEYS) assert.equal(row[key], undefined);
+  }
+});

@@ -98,8 +98,8 @@ delete; ids are the `rpt_<epoch-ms>` values returned by `POST /api/wait-times`.
 
 | Method | Path                          | Response                                                                                          |
 | ------ | ----------------------------- | ------------------------------------------------------------------------------------------------- |
-| POST   | `/api/subscriptions`          | `200/201` flat subscription `{id,endpoint,airportId,airportCode,userId,createdAt,updatedAt}` (aliases: `/api/notifications/subscribe`, `/api/push/subscribe`). Required: endpoint,p256dh,auth,airportId → `400 {"errors":[...]}` |
-| GET    | `/api/subscriptions`          | `200 {"subscriptions":[...]}` (flat rows, p256dh/auth redacted — push credentials are not publicly enumerable) |
+| POST   | `/api/subscriptions`          | `200/201` redacted subscription `{id,airportId,airportCode,createdAt,updatedAt}` (aliases: `/api/notifications/subscribe`, `/api/push/subscribe`). Required: endpoint,p256dh,auth,airportId → `400 {"errors":[...]}` |
+| GET    | `/api/subscriptions`          | `200 {"subscriptions":[...]}` — REDACTED rows only: no `endpoint` (bearer push credential), no `userId`, no `p256dh`/`auth`. Public responses must never expose them (TIR-294/TIR-309). |
 | DELETE | `/api/notifications/:id`      | `200 {"success":true,id}`; unknown id `404`; other user's subscription `403`                      |
 | GET    | `/api/notifications/:userId`  | `200 {subscriptions,total,page,pageSize}` (paginated, `?page=&pageSize=`, p256dh/auth redacted)   |
 

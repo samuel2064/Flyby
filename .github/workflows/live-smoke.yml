@@ -50,6 +50,22 @@ jobs:
           probe "/api/airports" '"code":"ATL"'
           probe "/api/checkpoints?airport=ATL" '"Domestic North Checkpoint A"'
 
+          # TIR-309 live guard: subscription endpoints must never leak push
+          # credentials or PII. An "endpoint"/"userId" field in a public
+          # response means the TIR-294 redaction lapsed again.
+          code=$(curl -s -o /tmp/subs.json -w '%{http_code}' --max-time 90 "$BASE_URL/api/subscriptions" || echo 000)
+          if [ "$code" != "200" ]; then
+            echo "Response body:"
+            head -c 500 /tmp/subs.json || true
+            fail "GET /api/subscriptions returned HTTP $code (expected 200)"
+          fi
+          if grep -q '"endpoint"\|"userId"\|"p256dh"\|"auth"' /tmp/subs.json; then
+            echo "Response body:"
+            head -c 500 /tmp/subs.json || true
+            fail "GET /api/subscriptions leaks push credentials / userId publicly - TIR-309 SEC leak"
+          fi
+          echo "OK    /api/subscriptions -> 200, redacted (TIR-309 contract)"
+
           # TIR-298 live guard: unknown airports must return app-level 404,
           # never a fabricated wait-time record.
           code=$(curl -s -o /tmp/wt_unknown.json -w '%{http_code}' --max-time 90 "$BASE_URL/api/wait-times?airport=YYY" || echo 000)
