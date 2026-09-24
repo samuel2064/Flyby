@@ -133,7 +133,14 @@ jobs:
         with:
           node-version: 22
       - name: Install web deps
-        run: npm ci --prefix apps/web
+        run: |
+          for attempt in 1 2; do
+            npm ci --prefix apps/web --no-audit --no-fund && exit 0
+            echo "npm ci attempt $attempt failed (transient registry/network); retrying in 30s"
+            sleep 30
+          done
+          exit 1
+
       - name: Install Playwright chromium
         run: npx playwright install --with-deps chromium
         working-directory: apps/web
