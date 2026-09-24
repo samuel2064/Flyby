@@ -96,6 +96,7 @@ jobs:
     name: Live web smoke
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - name: Probe the deployed PWA (retries tolerate Render cold starts)
         run: |
           set -uo pipefail
