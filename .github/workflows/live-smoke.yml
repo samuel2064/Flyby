@@ -126,7 +126,7 @@ jobs:
 
           echo "All live web smoke checks passed"
 
-      # TIR-319: browser-level DOM smoke for the deployed PWA. Status-code
+      # TIR-323: browser-level DOM smoke for the deployed PWA. Status-code
       # probes cannot see stale bundles, JS runtime errors, or states that
       # never resolve - the TIR-312 duplicate-cards defect was only ever
       # caught by hand. Playwright now does it on every tick.
