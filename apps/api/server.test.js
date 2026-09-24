@@ -1229,3 +1229,78 @@ test('computeWaitStats with no reports returns empty buckets, never fabricated v
   assert.ok(stats.byHourOfDay.every((b) => b.sampleSize === 0 && b.p50Minutes === null && b.p90Minutes === null));
   assert.ok(stats.byDayOfWeek.every((b) => b.sampleSize === 0));
 });
+
+// --- TIR-321 (scope merge): GET /api/wait-times/summary ----------------------
+// Cross-airport overview: latest reported wait + trend direction per airport.
+// Endpoint tests run in in-memory mode (no persisted reports) so they assert
+// the sane empty overview; trend/latest math is covered by unit tests.
+
+const { computeWaitTimesSummary } = require('./server.js');
+
+test('wait-times summary lists every supported airport, even with no data', async () => {
+  await ready;
+  const res = await fetch(`${BASE}/api/wait-times/summary`);
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.airportCount, 51);
+  assert.equal(body.airports.length, 51);
+  assert.equal(body.airportsWithData, 0);
+  const jfk = body.airports.find((a) => a.airport === 'JFK');
+  assert.ok(jfk, 'JFK present');
+  assert.equal(jfk.latestWaitMinutes, null);
+  assert.equal(jfk.latestReportedAt, null);
+  assert.equal(jfk.sampleSize, 0);
+  assert.equal(jfk.trend.direction, null, 'no trend for a report-less airport, never fabricated');
+  assert.deepEqual(
+    Object.keys(jfk).sort(),
+    ['airport', 'airportName', 'timezone', 'latestWaitMinutes', 'latestReportedAt', 'sampleSize', 'trend'].sort(),
+    'aggregate-only per-airport entry: no report records or userIds'
+  );
+});
+
+test('computeWaitTimesSummary picks the latest report per airport', () => {
+  const now = Date.UTC(2026, 0, 10, 12, 0, 0);
+  const reports = new Map([
+    ['JFK', [
+      { minutes: 10, reportedAt: new Date(now - 60 * 60 * 1000) },
+      { minutes: 30, reportedAt: new Date(now - 30 * 60 * 1000) },
+      { minutes: 20, reportedAt: new Date(now - 2 * 60 * 60 * 1000) },
+    ]],
+  ]);
+  const summary = computeWaitTimesSummary(now, reports);
+  const jfk = summary.airports.find((a) => a.airport === 'JFK');
+  assert.equal(jfk.latestWaitMinutes, 30);
+  assert.equal(jfk.latestReportedAt, new Date(now - 30 * 60 * 1000).toISOString());
+  assert.equal(jfk.sampleSize, 3);
+  assert.equal(summary.airportsWithData, 1);
+});
+
+test('computeWaitTimesSummary classifies trend direction from 3h windows', () => {
+  const hour = 60 * 60 * 1000;
+  const now = Date.UTC(2026, 0, 10, 12, 0, 0);
+  const mk = (cur, prev) => new Map([['JFK', [
+    { minutes: cur, reportedAt: new Date(now - hour) },
+    { minutes: prev, reportedAt: new Date(now - 4 * hour) },
+  ]]]);
+  const trendOf = (diff) => computeWaitTimesSummary(now, diff).airports.find((a) => a.airport === 'JFK').trend;
+  assert.equal(trendOf(mk(25, 10)).direction, 'up', '>= 5 min rise');
+  assert.equal(trendOf(mk(5, 15)).direction, 'down', '<= -5 min drop');
+  assert.equal(trendOf(mk(12, 10)).direction, 'flat', 'inside the 5 min band');
+  const shape = trendOf(mk(25, 10));
+  assert.equal(shape.currentAverageMinutes, 25);
+  assert.equal(shape.previousAverageMinutes, 10);
+  assert.equal(shape.currentSampleSize, 1);
+  assert.equal(shape.previousSampleSize, 1);
+  assert.equal(shape.windowHours, 3);
+});
+
+test('computeWaitTimesSummary returns null trend when either window is empty', () => {
+  const now = Date.UTC(2026, 0, 10, 12, 0, 0);
+  const hour = 60 * 60 * 1000;
+  const currentOnly = new Map([['JFK', [{ minutes: 20, reportedAt: new Date(now - hour) }]]]);
+  const staleOnly = new Map([['JFK', [{ minutes: 20, reportedAt: new Date(now - 5 * hour) }]]]);
+  const trendOf = (r) => computeWaitTimesSummary(now, r).airports.find((a) => a.airport === 'JFK').trend;
+  assert.equal(trendOf(currentOnly).direction, null, 'no baseline to compare against');
+  assert.equal(trendOf(staleOnly).direction, null, 'nothing current to compare');
+  assert.equal(trendOf(staleOnly).previousAverageMinutes, 20);
+});

@@ -1430,6 +1430,104 @@ app.get('/api/airports/:code/wait-stats', async (req, res) => {
   res.json(payload);
 });
 
+// --- Cross-airport wait-time summary (TIR-321 scope merge) --------------------
+// GET /api/wait-times/summary - one-call overview for the dashboard landing
+// view (TIR-317): every supported airport with its latest reported wait and a
+// trend direction. Trend compares the average wait in the current window
+// (last 3h) against the previous window (3-6h ago): 'up'/'down' when the shift
+// is >= 5 minutes, 'flat' inside the band, null when either window has no
+// reports (never fabricated). Aggregate-only: no userIds, no raw report
+// records. Compute-on-read with a single 5-minute in-memory cache entry.
+
+const WAIT_SUMMARY_CACHE_TTL_MS = 5 * 60 * 1000;
+let waitSummaryCache = null; // { expiresAt, payload }
+const TREND_WINDOW_MS = 3 * 60 * 60 * 1000;
+const TREND_THRESHOLD_MINUTES = 5;
+
+function windowAverage(minutes) {
+  if (minutes.length === 0) return null;
+  return Math.round((minutes.reduce((sum, m) => sum + m, 0) / minutes.length) * 10) / 10;
+}
+
+// Pure summary core (exported for unit tests): reports is a Map of
+// airportCode -> [{ minutes, reportedAt }]; now is the reference instant.
+function computeWaitTimesSummary(now, reports) {
+  const airports = AIRPORTS.map((airport) => {
+    const rows = (reports.get(airport.code) || [])
+      .map((r) => ({ minutes: r.minutes, at: r.reportedAt instanceof Date ? r.reportedAt : new Date(r.reportedAt) }))
+      .filter((r) => Number.isFinite(r.at.getTime()));
+    let latest = null;
+    for (const r of rows) {
+      if (!latest || r.at > latest.at) latest = r;
+    }
+    const current = [];
+    const previous = [];
+    for (const r of rows) {
+      const age = now - r.at.getTime();
+      if (age >= 0 && age < TREND_WINDOW_MS) current.push(r.minutes);
+      else if (age >= TREND_WINDOW_MS && age < 2 * TREND_WINDOW_MS) previous.push(r.minutes);
+    }
+    const currentAverageMinutes = windowAverage(current);
+    const previousAverageMinutes = windowAverage(previous);
+    let direction = null;
+    if (currentAverageMinutes !== null && previousAverageMinutes !== null) {
+      const delta = currentAverageMinutes - previousAverageMinutes;
+      direction =
+        delta >= TREND_THRESHOLD_MINUTES ? 'up' : delta <= -TREND_THRESHOLD_MINUTES ? 'down' : 'flat';
+    }
+    return {
+      airport: airport.code,
+      airportName: airport.name,
+      timezone: airport.timezone || 'UTC',
+      latestWaitMinutes: latest ? latest.minutes : null,
+      latestReportedAt: latest ? latest.at.toISOString() : null,
+      sampleSize: rows.length,
+      trend: {
+        direction,
+        currentAverageMinutes,
+        previousAverageMinutes,
+        currentSampleSize: current.length,
+        previousSampleSize: previous.length,
+        windowHours: TREND_WINDOW_MS / (60 * 60 * 1000),
+      },
+    };
+  });
+  const withData = airports.filter((a) => a.sampleSize > 0).length;
+  return { airportCount: airports.length, airportsWithData: withData, airports };
+}
+
+app.get('/api/wait-times/summary', async (req, res) => {
+  const now = Date.now();
+  if (waitSummaryCache && waitSummaryCache.expiresAt > now) {
+    return res.json(waitSummaryCache.payload);
+  }
+  const reports = new Map();
+  if (db) {
+    let rows = [];
+    try {
+      rows = await db.waitTimeReport.findMany({
+        select: { airport: true, waitMinutes: true, createdAt: true },
+      });
+    } catch (err) {
+      // Never serve fabricated stats on a DB error - and never cache them.
+      console.error(`wait-times summary DB read failed: ${err.message}`);
+      return res.status(500).json({ error: 'Database unavailable' });
+    }
+    for (const r of rows) {
+      const list = reports.get(r.airport) || [];
+      list.push({ minutes: r.waitMinutes, reportedAt: r.createdAt });
+      reports.set(r.airport, list);
+    }
+  }
+  const payload = {
+    ...computeWaitTimesSummary(now, reports),
+    generatedAt: new Date(now).toISOString(),
+    cacheTtlSeconds: Math.round(WAIT_SUMMARY_CACHE_TTL_MS / 1000),
+  };
+  waitSummaryCache = { expiresAt: now + WAIT_SUMMARY_CACHE_TTL_MS, payload };
+  res.json(payload);
+});
+
 // --- Basic operational metrics (TIR-287) -------------------------------------
 
 const startedAt = new Date();
@@ -1492,3 +1590,6 @@ module.exports.bucketWaitHistory = bucketWaitHistory;
 // Exposed for the test suite: wait-stats aggregation core (TIR-321) exercised
 // directly (percentiles, timezone bucketing, empty buckets) without a DB.
 module.exports.computeWaitStats = computeWaitStats;
+// Exposed for the test suite: cross-airport summary core (TIR-321 scope merge)
+// exercised directly (latest wait, trend windows, empty airports) without a DB.
+module.exports.computeWaitTimesSummary = computeWaitTimesSummary;
