@@ -1311,6 +1311,125 @@ app.get('/api/airports/:code/forecasts', async (req, res) => {
   });
 });
 
+// --- Per-airport wait-time statistics (TIR-321) -------------------------------
+// GET /api/airports/:id/wait-stats - read-only aggregate of crowd-sourced
+// wait-time reports for one airport: overall average + p50/p90 plus
+// hour-of-day and day-of-week breakdowns, bucketed in the airport's local
+// timezone. Powers the Phase 2 wait-time dashboard (TIR-317 frontend).
+//
+// Privacy/integrity invariants:
+//   - Stats are anonymous aggregates: the response carries no userIds, no
+//     raw report records, no endpoints (same redaction principle as TIR-309).
+//   - No fabrication: an airport with no reports returns sane empty buckets
+//     (sampleSize 0, null stats) instead of errors or invented numbers.
+//   - Abuse flagging: the WaitTimeReport schema has no moderation flag yet;
+//     the boot-time test-residue purge (TIR-294) and boundary validation
+//     (TIR-314) keep non-production data out of the store, so every persisted
+//     report counts. When a flag column lands, add it to the query's where
+//     clause (e.g. { flaggedAt: null }) and the cache will pick it up on TTL.
+//
+// Compute-on-read with a short in-memory cache (5 min TTL, keyed by airport
+// code -> at most one entry per supported airport). No materialized tables.
+
+const WAIT_STATS_CACHE_TTL_MS = 5 * 60 * 1000;
+const waitStatsCache = new Map(); // airportCode -> { expiresAt, payload }
+
+// Nearest-rank percentile over a sorted array; null for empty input.
+function percentileOf(sorted, q) {
+  if (sorted.length === 0) return null;
+  const idx = Math.ceil((q / 100) * sorted.length) - 1;
+  return sorted[Math.min(sorted.length - 1, Math.max(0, idx))];
+}
+
+function bucketStats(minutes) {
+  if (minutes.length === 0) {
+    return { averageMinutes: null, p50Minutes: null, p90Minutes: null, sampleSize: 0 };
+  }
+  const sorted = [...minutes].sort((a, b) => a - b);
+  const average = Math.round((sorted.reduce((sum, m) => sum + m, 0) / sorted.length) * 10) / 10;
+  return {
+    averageMinutes: average,
+    p50Minutes: percentileOf(sorted, 50),
+    p90Minutes: percentileOf(sorted, 90),
+    sampleSize: minutes.length,
+  };
+}
+
+const DOW_INDEX = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+
+function localWeekdayFormatter(timezone) {
+  try {
+    return new Intl.DateTimeFormat('en-US', { timeZone: timezone || 'UTC', weekday: 'short' });
+  } catch {
+    return new Intl.DateTimeFormat('en-US', { weekday: 'short' });
+  }
+}
+
+// Pure aggregation core (exported for unit tests): reports are
+// { minutes, reportedAt } and are bucketed by the airport's local wall clock.
+// Buckets with no reports return null stats and sampleSize 0 - never errors.
+function computeWaitStats(timezone, reports) {
+  const tz = timezone || 'UTC';
+  const hourFmt = localHourFormatter(tz);
+  const weekdayFmt = localWeekdayFormatter(tz);
+  const byHour = Array.from({ length: 24 }, () => []);
+  const byDay = Array.from({ length: 7 }, () => []);
+  const all = [];
+  for (const report of reports || []) {
+    const at = report.reportedAt instanceof Date ? report.reportedAt : new Date(report.reportedAt);
+    if (!Number.isFinite(at.getTime())) continue;
+    all.push(report.minutes);
+    byHour[localHourOf(at, hourFmt)].push(report.minutes);
+    const dayIndex = DOW_INDEX[weekdayFmt.format(at)];
+    byDay[dayIndex === undefined ? at.getUTCDay() : dayIndex].push(report.minutes);
+  }
+  return {
+    timezone: tz,
+    sampleSize: all.length,
+    overall: bucketStats(all),
+    byHourOfDay: byHour.map((minutes, hour) => ({ hour, ...bucketStats(minutes) })),
+    byDayOfWeek: byDay.map((minutes, day) => ({ day, ...bucketStats(minutes) })),
+  };
+}
+
+app.get('/api/airports/:code/wait-stats', async (req, res) => {
+  const raw = String(req.params.code || '').trim();
+  const airport = AIRPORTS.find((a) => a.code === raw.toUpperCase() || a.id === raw);
+  if (!airport) {
+    return res
+      .status(404)
+      .json({ errors: [{ field: 'code', message: `Airport not found: ${raw}` }] });
+  }
+  const now = Date.now();
+  const cached = waitStatsCache.get(airport.code);
+  if (cached && cached.expiresAt > now) {
+    return res.json(cached.payload);
+  }
+  let reports = [];
+  if (db) {
+    try {
+      const rows = await db.waitTimeReport.findMany({
+        where: { airport: airport.code },
+        select: { waitMinutes: true, createdAt: true },
+      });
+      reports = rows.map((r) => ({ minutes: r.waitMinutes, reportedAt: r.createdAt }));
+    } catch (err) {
+      // Never serve fabricated stats on a DB error - and never cache them.
+      console.error(`wait-stats DB read failed: ${err.message}`);
+      return res.status(500).json({ error: 'Database unavailable' });
+    }
+  }
+  const payload = {
+    airport: airport.code,
+    airportName: airport.name,
+    ...computeWaitStats(airport.timezone, reports),
+    generatedAt: new Date(now).toISOString(),
+    cacheTtlSeconds: Math.round(WAIT_STATS_CACHE_TTL_MS / 1000),
+  };
+  waitStatsCache.set(airport.code, { expiresAt: now + WAIT_STATS_CACHE_TTL_MS, payload });
+  res.json(payload);
+});
+
 // --- Basic operational metrics (TIR-287) -------------------------------------
 
 const startedAt = new Date();
@@ -1370,3 +1489,6 @@ module.exports.findCheckpointById = findCheckpointById;
 // Exposed for the test suite: history core unit tests (checkpoint chart)
 // exercise the interval bucketing and averaging directly, without a DB.
 module.exports.bucketWaitHistory = bucketWaitHistory;
+// Exposed for the test suite: wait-stats aggregation core (TIR-321) exercised
+// directly (percentiles, timezone bucketing, empty buckets) without a DB.
+module.exports.computeWaitStats = computeWaitStats;

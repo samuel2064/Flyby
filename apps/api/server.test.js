@@ -1151,3 +1151,81 @@ test('alias DELETE enforces the ownership guard on mismatched X-User-Id', async 
   });
   assert.equal(okDel.status, 200);
 });
+
+// --- TIR-321: GET /api/airports/:id/wait-stats --------------------------------
+// Per-airport anonymous aggregates for the Phase 2 dashboard. Endpoint tests
+// run in in-memory mode (no persisted reports) so they assert the sane empty
+// response; the aggregation math is covered by computeWaitStats unit tests.
+
+const { computeWaitStats } = require('./server.js');
+
+test('wait-stats returns 404 for an unknown airport (no fabricated stats)', async () => {
+  await ready;
+  const res = await fetch(`${BASE}/api/airports/ZZZ/wait-stats`);
+  assert.equal(res.status, 404);
+});
+
+test('wait-stats for an airport with no reports returns sane empty buckets, not errors', async () => {
+  await ready;
+  const res = await fetch(`${BASE}/api/airports/SEA/wait-stats`);
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.airport, 'SEA');
+  assert.equal(body.sampleSize, 0);
+  assert.deepEqual(body.overall, {
+    averageMinutes: null,
+    p50Minutes: null,
+    p90Minutes: null,
+    sampleSize: 0,
+  });
+  assert.equal(body.byHourOfDay.length, 24, 'all 24 hour buckets are always present');
+  assert.equal(body.byDayOfWeek.length, 7, 'all 7 day-of-week buckets are always present');
+  assert.ok(body.byHourOfDay.every((b, i) => b.hour === i && b.sampleSize === 0 && b.averageMinutes === null));
+  assert.ok(body.byDayOfWeek.every((b, i) => b.day === i && b.sampleSize === 0 && b.averageMinutes === null));
+  assert.equal(typeof body.timezone, 'string');
+  assert.deepEqual(Object.keys(body).sort(),
+    ['airport', 'airportName', 'byDayOfWeek', 'byHourOfDay', 'cacheTtlSeconds', 'generatedAt', 'overall', 'sampleSize', 'timezone'].sort(),
+    'aggregate-only response: no report records, userIds, or endpoints');
+});
+
+test('wait-stats accepts the airport id (apt-jfk) as well as the code', async () => {
+  await ready;
+  const res = await fetch(`${BASE}/api/airports/apt-jfk/wait-stats`);
+  assert.equal(res.status, 200);
+  assert.equal((await res.json()).airport, 'JFK');
+});
+
+test('computeWaitStats aggregates overall stats and percentiles', () => {
+  const reports = [5, 10, 10, 20, 40, 60, 90, 120].map((minutes, i) => ({
+    minutes,
+    reportedAt: new Date(Date.UTC(2026, 0, 5 + i, 12, 0, 0)), // all in one hour bucket
+  }));
+  const stats = computeWaitStats('UTC', reports);
+  assert.equal(stats.sampleSize, 8);
+  assert.equal(stats.overall.averageMinutes, 44.4);
+  assert.equal(stats.overall.p50Minutes, 20);
+  assert.equal(stats.overall.p90Minutes, 120);
+});
+
+test('computeWaitStats buckets by airport-local hour and day-of-week', () => {
+  // 2026-01-05T20:30Z is Mon 15:30 in America/New_York (UTC-5): it must land
+  // in hour 15 / Monday, not the UTC-facing hour 20.
+  const report = { minutes: 30, reportedAt: new Date('2026-01-05T20:30:00Z') };
+  const stats = computeWaitStats('America/New_York', [report]);
+  assert.equal(stats.byHourOfDay[15].sampleSize, 1);
+  assert.equal(stats.byHourOfDay[15].averageMinutes, 30);
+  assert.equal(stats.byHourOfDay[20].sampleSize, 0);
+  assert.equal(stats.byDayOfWeek[1].sampleSize, 1, 'Monday');
+  for (const day of stats.byDayOfWeek) {
+    if (day.day !== 1) assert.equal(day.sampleSize, 0);
+  }
+});
+
+test('computeWaitStats with no reports returns empty buckets, never fabricated values', () => {
+  const stats = computeWaitStats('UTC', []);
+  assert.equal(stats.sampleSize, 0);
+  assert.equal(stats.overall.averageMinutes, null);
+  assert.equal(stats.byHourOfDay.length, 24);
+  assert.ok(stats.byHourOfDay.every((b) => b.sampleSize === 0 && b.p50Minutes === null && b.p90Minutes === null));
+  assert.ok(stats.byDayOfWeek.every((b) => b.sampleSize === 0));
+});
