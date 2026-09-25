@@ -1329,6 +1329,22 @@ test('flag endpoint rejects a non-string reason', async () => {
   assert.equal(res.status, 400);
 });
 
+test('flag endpoint rejects a non-string sessionId (TIR-337)', async () => {
+  await ready;
+  const res = await fetch(`${BASE}/api/reports/rpt_1234567890/flag`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: 42 }),
+  });
+  assert.equal(res.status, 400);
+});
+
+test('flag endpoint rejects an empty sessionId (TIR-337)', async () => {
+  await ready;
+  const res = await fetch(`${BASE}/api/reports/rpt_1234567890/flag`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: '   ' }),
+  });
+  assert.equal(res.status, 400);
+});
+
 test('flag endpoint is fail-closed (503) without a database - no fabricated flag', async () => {
   await ready;
   const res = await fetch(`${BASE}/api/reports/rpt_1234567890/flag`, {

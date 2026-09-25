@@ -36,6 +36,8 @@ model WaitTimeReport {
   flagReason       String?
   moderationStatus String   @default("none")
 
+  flags ReportFlag[]
+
   @@index([airport])
   @@index([createdAt])
   @@index([moderationStatus])
@@ -66,4 +68,20 @@ model UserPreference {
   thresholdMinutes Int
   frequency        String
   updatedAt        DateTime @updatedAt
+}
+
+// Crowdsourced trust flags (TIR-337 / TIR-324): one row per
+// (reportId, sessionId) so repeat flags from the same session count once.
+// A report reaching FLAG_HIDE_THRESHOLD distinct sessions is hidden from all
+// public surfaces (wait-times, wait-stats, summary).
+model ReportFlag {
+  id        Int            @id @default(autoincrement())
+  reportId  String
+  sessionId String
+  reason    String?
+  createdAt DateTime       @default(now())
+  report    WaitTimeReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+
+  @@unique([reportId, sessionId])
+  @@index([reportId])
 }

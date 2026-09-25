@@ -432,6 +432,8 @@ function moderationView(r) {
     flaggedAt: r.flaggedAt instanceof Date ? r.flaggedAt.toISOString() : r.flaggedAt,
     flagReason: r.flagReason,
     moderationStatus: r.moderationStatus,
+    // Distinct-session trust count (TIR-337); present when the query included _count.
+    ...(r._count ? { flagCount: r._count.flags } : {}),
   };
 }
 
@@ -439,10 +441,15 @@ const MODERATION_STATUSES = ['flagged', 'hidden', 'none'];
 const MAX_FLAG_REASON_LENGTH = 280;
 
 // POST /api/reports/:id/flag - public crowdsourced abuse flag (TIR-319 UI).
-// Body: { reason?: string }. Marks the report for review; the report stays
-// live until a moderator hides it. Idempotent: re-flagging a flagged report
-// updates the reason only. Public events stay redacted: 201 carries only the
-// report id + status, never the content the flagger may be guessing at.
+// Body: { reason?: string, sessionId?: string }. Trust exclusion (TIR-324 /
+// TIR-337): flags are deduplicated per (reportId, sessionId); once
+// FLAG_HIDE_THRESHOLD DISTINCT sessions flag a report it leaves every public
+// surface (wait-times, wait-stats, summary) as moderationStatus 'hidden',
+// subject to moderator clear. Requests without a sessionId still mark the
+// report flagged for review but cannot trip the threshold (no dedupe key).
+// Public responses stay redacted: only id/status/flagCount, never content.
+const FLAG_HIDE_THRESHOLD = 3;
+const MAX_FLAG_SESSION_LENGTH = 128;
 app.post('/api/reports/:id/flag', async (req, res) => {
   const id = req.params.id;
   if (typeof id !== 'string' || !REPORT_ID_PATTERN.test(id)) {
@@ -455,29 +462,53 @@ app.post('/api/reports/:id/flag', async (req, res) => {
     }
     reason = req.body.reason.trim().slice(0, MAX_FLAG_REASON_LENGTH);
   }
+  let sessionId = null;
+  if (req.body && req.body.sessionId !== undefined) {
+    if (typeof req.body.sessionId !== 'string' || req.body.sessionId.trim() === '') {
+      return res.status(400).json({ errors: [{ field: 'sessionId', message: 'sessionId must be a non-empty string' }] });
+    }
+    sessionId = req.body.sessionId.trim().slice(0, MAX_FLAG_SESSION_LENGTH);
+  }
   // No persistence, no durable flag: moderation requires the DB.
   if (!db) {
     return res.status(503).json({ error: 'Moderation is disabled: database unavailable' });
   }
   try {
-    const existing = await db.waitTimeReport.findUnique({ where: { id } });
-    if (!existing) {
+    const { updated, flagCount, becameHidden } = await db.$transaction(async (tx) => {
+      const existing = await tx.waitTimeReport.findUnique({ where: { id } });
+      if (!existing) return { updated: null, flagCount: 0, becameHidden: false };
+      if (sessionId) {
+        // UNIQUE(reportId, sessionId): same session re-flagging updates the
+        // reason but never inflates the trust count.
+        await tx.reportFlag.upsert({
+          where: { reportId_sessionId: { reportId: id, sessionId } },
+          create: { reportId: id, sessionId, reason },
+          update: reason ? { reason } : {},
+        });
+      }
+      const flagCount = await tx.reportFlag.count({ where: { reportId: id } });
+      const wasHidden = existing.moderationStatus === 'hidden';
+      const updated = await tx.waitTimeReport.update({
+        where: { id },
+        data: {
+          flaggedAt: existing.flaggedAt || new Date(),
+          flagReason: reason || existing.flagReason,
+          // Hidden stays hidden; otherwise hide at the trust threshold.
+          moderationStatus: wasHidden || flagCount >= FLAG_HIDE_THRESHOLD ? 'hidden' : 'flagged',
+        },
+      });
+      return { updated, flagCount, becameHidden: !wasHidden && updated.moderationStatus === 'hidden' };
+    });
+    if (!updated) {
       return res.status(404).json({ error: 'Report not found' });
     }
-    const updated = await db.waitTimeReport.update({
-      where: { id },
-      data: {
-        flaggedAt: existing.flaggedAt || new Date(),
-        flagReason: reason || existing.flagReason,
-        // Re-flagging a moderator-hidden report does not resurrect it.
-        moderationStatus: existing.moderationStatus === 'hidden' ? 'hidden' : 'flagged',
-      },
-    });
+    // Threshold crossing changes public surfaces immediately (5-min caches).
+    if (becameHidden) invalidateAggregates();
     console.info(JSON.stringify({
       event: 'report_flagged', timestamp: new Date().toISOString(),
-      reportId: id, airport: existing.airport, checkpoint: existing.checkpoint,
+      reportId: id, airport: updated.airport, checkpoint: updated.checkpoint, flagCount,
     }));
-    return res.status(201).json({ id: updated.id, flaggedAt: updated.flaggedAt.toISOString(), moderationStatus: updated.moderationStatus });
+    return res.status(201).json({ id: updated.id, flaggedAt: updated.flaggedAt.toISOString(), moderationStatus: updated.moderationStatus, flagCount });
   } catch (err) {
     console.error(`POST /api/reports/${id}/flag error: ${err.message}`);
     return res.status(500).json({ error: 'Database unavailable' });
@@ -500,6 +531,7 @@ app.get('/api/moderation/reports', async (req, res) => {
       where: { moderationStatus: status },
       orderBy: { flaggedAt: 'desc' },
       take: 500,
+      include: { _count: { select: { flags: true } } },
     });
     return res.json(rows.map(moderationView));
   } catch (err) {
@@ -528,7 +560,15 @@ function moderationAction(newStatus, res, id) {
         newStatus === 'hidden'
           ? { moderationStatus: 'hidden' } // keep flag record for audit
           : { moderationStatus: 'none', flaggedAt: null, flagReason: null };
-      const updated = await db.waitTimeReport.update({ where: { id }, data });
+      const updated = await db.$transaction(async (tx) => {
+        const row = await tx.waitTimeReport.update({ where: { id }, data });
+        // Clearing a flag also resets the trust counter (TIR-337): remove all
+        // session flags so the report starts clean.
+        if (newStatus === 'none') {
+          await tx.reportFlag.deleteMany({ where: { reportId: id } });
+        }
+        return row;
+      });
       invalidateAggregates();
       console.info(JSON.stringify({
         event: newStatus === 'hidden' ? 'report_hidden' : 'report_cleared',
