@@ -3,6 +3,7 @@ import { DEFAULT_AIRPORT, type Airport } from './data/airports'
 import { useWaitTimes, formatRelativeTime } from './hooks/useWaitTimes'
 import { useForecasts } from './hooks/useForecasts'
 import { buildBestByCheckpoint } from './lib/forecastChip'
+import { buildConsensusByCheckpoint } from './lib/crowdConsensus'
 import { AirportSearch } from './components/AirportSearch'
 import { CheckpointCard } from './components/CheckpointCard'
 import { ReportSheet } from './components/ReportSheet'
@@ -17,6 +18,10 @@ export default function App() {
   const { forecasts, loading: forecastsLoading } = useForecasts(airport.code, lastUpdated)
   const bestByCheckpoint = useMemo(
     () => buildBestByCheckpoint(forecasts),
+    [forecasts],
+  )
+  const consensusByCheckpoint = useMemo(
+    () => buildConsensusByCheckpoint(forecasts),
     [forecasts],
   )
 
@@ -119,6 +124,7 @@ export default function App() {
                   onReport={setReportTarget}
                   best={bestByCheckpoint.bestFor(waitTime.checkpoint)}
                   bestLoading={forecastsLoading}
+                  consensus={consensusByCheckpoint.consensusFor(waitTime.checkpoint)}
                 />
               ))}
             {state === 'ready' && waitTimes.length === 0 && (
