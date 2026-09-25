@@ -7,6 +7,7 @@ import { buildConsensusByCheckpoint } from './lib/crowdConsensus'
 import { AirportSearch } from './components/AirportSearch'
 import { CheckpointCard } from './components/CheckpointCard'
 import { ReportSheet } from './components/ReportSheet'
+import { InstallPrompt } from './components/InstallPrompt'
 import { SkeletonCard } from './components/SkeletonCard'
 
 export default function App() {
@@ -159,6 +160,7 @@ export default function App() {
         onClose={() => setReportTarget(undefined)}
         onReported={refresh}
       />
+      <InstallPrompt />
     </div>
   )
 }
