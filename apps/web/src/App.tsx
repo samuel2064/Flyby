@@ -119,8 +119,12 @@ export default function App() {
             )}
             {state === 'ready' &&
               waitTimes.map((waitTime) => (
+                // Key stability: one row per checkpoint client-side
+                // (latestPerCheckpoint). updatedAt used to live in the key,
+                // which unmounted+remounted every card - and its history
+                // chart animation - on every SSE tick.
                 <CheckpointCard
-                  key={`${waitTime.checkpoint}-${waitTime.updatedAt}`}
+                  key={waitTime.checkpoint.toLowerCase()}
                   waitTime={waitTime}
                   onReport={setReportTarget}
                   best={bestByCheckpoint.bestFor(waitTime.checkpoint)}
