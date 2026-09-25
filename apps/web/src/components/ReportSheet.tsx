@@ -1,7 +1,8 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { submitWaitTimeReport } from '../api/waitTimes'
 import { checkpointOptions } from '../data/airports'
 import { canSubmitReport, effectiveCheckpointPick } from '../lib/reportCheckpoint'
+import { extractRateLimitSeconds, formatWaitMessage } from '../lib/rateLimitFeedback'
 import type { WaitLevel } from '../api/types'
 import { waitLevel } from '../api/types'
 
@@ -39,6 +40,22 @@ export function ReportSheet({
   const activeCheckpoint = checkpoint ?? effectivePick
   const canSubmit = canSubmitReport(activeCheckpoint)
 
+  // Rate-limit feedback: a 429 gives the countdown window; the submit button
+  // stays disabled while it ticks down (mirrors the monorepo design).
+  const [rateLimitUntil, setRateLimitUntil] = useState<number | null>(null)
+  const [nowTick, setNowTick] = useState(() => Date.now())
+
+  useEffect(() => {
+    if (rateLimitUntil === null) return
+    if (rateLimitUntil <= Date.now()) return
+    const timer = window.setInterval(() => setNowTick(Date.now()), 1000)
+    return () => window.clearInterval(timer)
+  }, [rateLimitUntil])
+
+  const secondsLeft =
+    rateLimitUntil === null ? 0 : Math.max(0, Math.ceil((rateLimitUntil - nowTick) / 1000))
+  const rateLimited = rateLimitUntil !== null && secondsLeft > 0
+
   if (!open) return null
 
   async function handleSubmit() {
@@ -57,8 +74,14 @@ export function ReportSheet({
         setSubmitted(false)
         onClose()
       }, 1200)
-    } catch {
-      setError('Could not submit your report. Please try again.')
+    } catch (err) {
+      const seconds = extractRateLimitSeconds(err)
+      if (seconds !== null) {
+        setRateLimitUntil(Date.now() + seconds * 1000)
+        setError(null)
+      } else {
+        setError('Could not submit your report. Please try again.')
+      }
     } finally {
       setSubmitting(false)
     }
@@ -164,13 +187,28 @@ export function ReportSheet({
                 {error}
               </p>
             )}
+            {rateLimited && (
+              <p
+                role="status"
+                data-testid="rate-limit-countdown"
+                className="mt-3 rounded-xl bg-amber-50 p-3 text-sm font-medium text-amber-900"
+              >
+                {formatWaitMessage(secondsLeft)}
+              </p>
+            )}
             <button
               type="button"
               onClick={handleSubmit}
-              disabled={submitting || !canSubmit}
+              disabled={submitting || !canSubmit || rateLimited}
               className="mt-5 inline-flex h-12 w-full items-center justify-center rounded-xl bg-brand-500 text-base font-semibold text-white transition hover:bg-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-500/40 disabled:opacity-60"
             >
-              {submitting ? 'Submitting…' : canSubmit ? 'Submit report' : 'Pick a checkpoint first'}
+              {submitting
+                ? 'Submitting…'
+                : rateLimited
+                  ? formatWaitMessage(secondsLeft)
+                  : canSubmit
+                    ? 'Submit report'
+                    : 'Pick a checkpoint first'}
             </button>
           </>
         )}
