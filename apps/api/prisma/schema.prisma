@@ -29,8 +29,16 @@ model WaitTimeReport {
   reporter    String?
   createdAt   DateTime @default(now())
 
+  // Moderation (TIR-325): durable abuse-flag state for the review queue.
+  // moderationStatus: 'none' (default) | 'flagged' (awaiting review) |
+  // 'hidden' (moderator-removed from public surfaces until cleared).
+  flaggedAt        DateTime?
+  flagReason       String?
+  moderationStatus String   @default("none")
+
   @@index([airport])
   @@index([createdAt])
+  @@index([moderationStatus])
 }
 
 // Push-notification subscriptions. Idempotent per endpoint+airportId (QA contract).

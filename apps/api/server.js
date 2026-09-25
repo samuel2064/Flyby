@@ -153,7 +153,10 @@ app.get('/api/wait-times', async (req, res) => {
   }
   try {
     if (db) {
-      const where = rawAirport ? { airport } : {};
+      // Moderation (TIR-325): moderator-hidden reports leave every public surface.
+      const where = rawAirport
+        ? { airport, moderationStatus: { not: 'hidden' } }
+        : { moderationStatus: { not: 'hidden' } };
       const rows = await db.waitTimeReport.findMany({
         where,
         orderBy: { createdAt: 'desc' },
@@ -374,6 +377,183 @@ app.delete('/api/reports/:id', async (req, res) => {
     console.error(`DELETE /api/reports/${id} error: ${err.message}`);
     return res.status(500).json({ error: 'Database unavailable' });
   }
+});
+
+// --- Moderation: abuse flags + review queue (TIR-325) ------------------------
+// Durable moderation state on WaitTimeReport (flaggedAt / flagReason /
+// moderationStatus: none | flagged | hidden). Powers the TIR-319 flag flow
+// and its review queue.
+//
+// Public surface rule (TIR-309 redaction discipline, extended): hidden
+// reports are excluded from every public read (wait-times list, wait-stats,
+// summary). Flagged-but-unactioned reports still count until a moderator
+// hides them - flagging is a signal, not an instant removal.
+//
+// Redaction: moderation responses never carry the reporter/userId - the
+// review queue shows the flagged content, not the submitter.
+
+// Admin guard shared by the review queue and the hide/clear actions. Same
+// contract as DELETE /api/reports: fail-closed when ADMIN_API_KEY is unset,
+// constant-time comparison, 503/401 responses.
+function requireAdmin(req, res) {
+  const adminKey = configuredAdminKey();
+  if (!adminKey) {
+    res.status(503).json({ error: 'Moderation is disabled: ADMIN_API_KEY is not configured' });
+    return false;
+  }
+  const providedKey = extractAdminKey(req);
+  if (!providedKey || !adminKeyMatches(providedKey, adminKey)) {
+    res.status(401).json({ error: 'Invalid or missing admin key' });
+    return false;
+  }
+  return true;
+}
+
+// A hidden/cleared report may live in the stats/summary caches for a stale
+// window; drop them so moderation takes effect immediately.
+const waitStatsInvalidators = []; // registered by the stats/summary sections
+function invalidateAggregates() {
+  for (const invalidate of waitStatsInvalidators) invalidate();
+}
+
+// Redacted moderation view of a report row: no reporter, no userIds.
+function moderationView(r) {
+  return {
+    id: r.id,
+    airport: r.airport,
+    checkpoint: r.checkpoint,
+    waitMinutes: r.waitMinutes,
+    reportedAt: r.createdAt instanceof Date ? r.createdAt.toISOString() : r.createdAt,
+    flaggedAt: r.flaggedAt instanceof Date ? r.flaggedAt.toISOString() : r.flaggedAt,
+    flagReason: r.flagReason,
+    moderationStatus: r.moderationStatus,
+  };
+}
+
+const MODERATION_STATUSES = ['flagged', 'hidden', 'none'];
+const MAX_FLAG_REASON_LENGTH = 280;
+
+// POST /api/reports/:id/flag - public crowdsourced abuse flag (TIR-319 UI).
+// Body: { reason?: string }. Marks the report for review; the report stays
+// live until a moderator hides it. Idempotent: re-flagging a flagged report
+// updates the reason only. Public events stay redacted: 201 carries only the
+// report id + status, never the content the flagger may be guessing at.
+app.post('/api/reports/:id/flag', async (req, res) => {
+  const id = req.params.id;
+  if (typeof id !== 'string' || !REPORT_ID_PATTERN.test(id)) {
+    return res.status(400).json({ error: 'Invalid report id' });
+  }
+  let reason = null;
+  if (req.body && req.body.reason !== undefined) {
+    if (typeof req.body.reason !== 'string' || req.body.reason.trim() === '') {
+      return res.status(400).json({ errors: [{ field: 'reason', message: 'reason must be a non-empty string' }] });
+    }
+    reason = req.body.reason.trim().slice(0, MAX_FLAG_REASON_LENGTH);
+  }
+  // No persistence, no durable flag: moderation requires the DB.
+  if (!db) {
+    return res.status(503).json({ error: 'Moderation is disabled: database unavailable' });
+  }
+  try {
+    const existing = await db.waitTimeReport.findUnique({ where: { id } });
+    if (!existing) {
+      return res.status(404).json({ error: 'Report not found' });
+    }
+    const updated = await db.waitTimeReport.update({
+      where: { id },
+      data: {
+        flaggedAt: existing.flaggedAt || new Date(),
+        flagReason: reason || existing.flagReason,
+        // Re-flagging a moderator-hidden report does not resurrect it.
+        moderationStatus: existing.moderationStatus === 'hidden' ? 'hidden' : 'flagged',
+      },
+    });
+    console.info(JSON.stringify({
+      event: 'report_flagged', timestamp: new Date().toISOString(),
+      reportId: id, airport: existing.airport, checkpoint: existing.checkpoint,
+    }));
+    return res.status(201).json({ id: updated.id, flaggedAt: updated.flaggedAt.toISOString(), moderationStatus: updated.moderationStatus });
+  } catch (err) {
+    console.error(`POST /api/reports/${id}/flag error: ${err.message}`);
+    return res.status(500).json({ error: 'Database unavailable' });
+  }
+});
+
+// GET /api/moderation/reports?status=flagged|hidden|none - review queue.
+// Admin-only: a public queue would expose flagged content (and reward abuse).
+app.get('/api/moderation/reports', async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const status = req.query.status || 'flagged';
+  if (!MODERATION_STATUSES.includes(status)) {
+    return res.status(400).json({ errors: [{ field: 'status', message: `status must be one of: ${MODERATION_STATUSES.join(', ')}` }] });
+  }
+  if (!db) {
+    return res.status(503).json({ error: 'Moderation is disabled: database unavailable' });
+  }
+  try {
+    const rows = await db.waitTimeReport.findMany({
+      where: { moderationStatus: status },
+      orderBy: { flaggedAt: 'desc' },
+      take: 500,
+    });
+    return res.json(rows.map(moderationView));
+  } catch (err) {
+    console.error(`GET /api/moderation/reports error: ${err.message}`);
+    return res.status(500).json({ error: 'Database unavailable' });
+  }
+});
+
+// POST /api/moderation/reports/:id/hide - moderator removes a report from all
+// public surfaces (kept in the DB for audit/clear). Admin-only.
+// POST /api/moderation/reports/:id/clear - moderator clears the flag: back to
+// 'none', flag fields reset, report visible again if it was hidden.
+function moderationAction(newStatus, res, id) {
+  return async () => {
+    if (!db) {
+      res.status(503).json({ error: 'Moderation is disabled: database unavailable' });
+      return;
+    }
+    try {
+      const existing = await db.waitTimeReport.findUnique({ where: { id } });
+      if (!existing) {
+        res.status(404).json({ error: 'Report not found' });
+        return;
+      }
+      const data =
+        newStatus === 'hidden'
+          ? { moderationStatus: 'hidden' } // keep flag record for audit
+          : { moderationStatus: 'none', flaggedAt: null, flagReason: null };
+      const updated = await db.waitTimeReport.update({ where: { id }, data });
+      invalidateAggregates();
+      console.info(JSON.stringify({
+        event: newStatus === 'hidden' ? 'report_hidden' : 'report_cleared',
+        timestamp: new Date().toISOString(), reportId: id,
+        airport: existing.airport, checkpoint: existing.checkpoint,
+      }));
+      res.json(moderationView(updated));
+    } catch (err) {
+      console.error(`moderation ${newStatus} /api/moderation/reports/${id} error: ${err.message}`);
+      res.status(500).json({ error: 'Database unavailable' });
+    }
+  };
+}
+
+app.post('/api/moderation/reports/:id/hide', async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const id = req.params.id;
+  if (typeof id !== 'string' || !REPORT_ID_PATTERN.test(id)) {
+    return res.status(400).json({ error: 'Invalid report id' });
+  }
+  await moderationAction('hidden', res, id)();
+});
+
+app.post('/api/moderation/reports/:id/clear', async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const id = req.params.id;
+  if (typeof id !== 'string' || !REPORT_ID_PATTERN.test(id)) {
+    return res.status(400).json({ error: 'Invalid report id' });
+  }
+  await moderationAction('none', res, id)();
 });
 
 
@@ -1322,17 +1502,18 @@ app.get('/api/airports/:code/forecasts', async (req, res) => {
 //     raw report records, no endpoints (same redaction principle as TIR-309).
 //   - No fabrication: an airport with no reports returns sane empty buckets
 //     (sampleSize 0, null stats) instead of errors or invented numbers.
-//   - Abuse flagging: the WaitTimeReport schema has no moderation flag yet;
-//     the boot-time test-residue purge (TIR-294) and boundary validation
-//     (TIR-314) keep non-production data out of the store, so every persisted
-//     report counts. When a flag column lands, add it to the query's where
-//     clause (e.g. { flaggedAt: null }) and the cache will pick it up on TTL.
+//   - Moderation (TIR-325): moderator-hidden reports are excluded via the
+//     query's where clause; the reflect-moderation cache invalidation fires
+//     before TTL expiry, and flagged-but-unactioned reports still count until
+//     a moderator hides them.
 //
 // Compute-on-read with a short in-memory cache (5 min TTL, keyed by airport
 // code -> at most one entry per supported airport). No materialized tables.
 
 const WAIT_STATS_CACHE_TTL_MS = 5 * 60 * 1000;
 const waitStatsCache = new Map(); // airportCode -> { expiresAt, payload }
+// Moderation (TIR-325): hiding a report must reflect in stats immediately.
+waitStatsInvalidators.push(() => waitStatsCache.clear());
 
 // Nearest-rank percentile over a sorted array; null for empty input.
 function percentileOf(sorted, q) {
@@ -1409,7 +1590,8 @@ app.get('/api/airports/:code/wait-stats', async (req, res) => {
   if (db) {
     try {
       const rows = await db.waitTimeReport.findMany({
-        where: { airport: airport.code },
+        // Moderation (TIR-325): hidden reports are excluded from stats.
+        where: { airport: airport.code, moderationStatus: { not: 'hidden' } },
         select: { waitMinutes: true, createdAt: true },
       });
       reports = rows.map((r) => ({ minutes: r.waitMinutes, reportedAt: r.createdAt }));
@@ -1441,6 +1623,7 @@ app.get('/api/airports/:code/wait-stats', async (req, res) => {
 
 const WAIT_SUMMARY_CACHE_TTL_MS = 5 * 60 * 1000;
 let waitSummaryCache = null; // { expiresAt, payload }
+waitStatsInvalidators.push(() => { waitSummaryCache = null; });
 const TREND_WINDOW_MS = 3 * 60 * 60 * 1000;
 const TREND_THRESHOLD_MINUTES = 5;
 
@@ -1506,6 +1689,8 @@ app.get('/api/wait-times/summary', async (req, res) => {
     let rows = [];
     try {
       rows = await db.waitTimeReport.findMany({
+        // Moderation (TIR-325): hidden reports are excluded from the summary.
+        where: { moderationStatus: { not: 'hidden' } },
         select: { airport: true, waitMinutes: true, createdAt: true },
       });
     } catch (err) {

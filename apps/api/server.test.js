@@ -1304,3 +1304,81 @@ test('computeWaitTimesSummary returns null trend when either window is empty', (
   assert.equal(trendOf(staleOnly).direction, null, 'nothing current to compare');
   assert.equal(trendOf(staleOnly).previousAverageMinutes, 20);
 });
+
+// --- TIR-325: moderation (flag endpoint + review queue) ---------------------
+// The suite runs in in-memory mode (no DB), so write paths assert the
+// fail-closed 503s instead of fabricated success, and guard tests assert
+// 401/400 behavior. Live DB behavior of flag/queue/hide/clear is verified
+// against prod in the TIR-325 completion comment.
+
+const MOD_ADMIN_KEY = ADMIN_KEY;
+
+test('flag endpoint rejects an invalid report id before any DB access', async () => {
+  await ready;
+  const res = await fetch(`${BASE}/api/reports/bad%20id%21/flag`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
+  });
+  assert.equal(res.status, 400);
+});
+
+test('flag endpoint rejects a non-string reason', async () => {
+  await ready;
+  const res = await fetch(`${BASE}/api/reports/rpt_1234567890/flag`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason: 42 }),
+  });
+  assert.equal(res.status, 400);
+});
+
+test('flag endpoint is fail-closed (503) without a database - no fabricated flag', async () => {
+  await ready;
+  const res = await fetch(`${BASE}/api/reports/rpt_1234567890/flag`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason: 'spam' }),
+  });
+  assert.equal(res.status, 503);
+});
+
+test('review queue requires admin auth (401 without a key)', async () => {
+  await ready;
+  process.env.ADMIN_API_KEY = MOD_ADMIN_KEY;
+  const res = await fetch(`${BASE}/api/moderation/reports`);
+  assert.equal(res.status, 401);
+});
+
+test('review queue rejects an invalid status filter (400)', async () => {
+  await ready;
+  process.env.ADMIN_API_KEY = MOD_ADMIN_KEY;
+  const res = await fetch(`${BASE}/api/moderation/reports?status=bananas`, {
+    headers: { 'X-Admin-Key': MOD_ADMIN_KEY },
+  });
+  assert.equal(res.status, 400);
+  assert.match((await res.json()).errors[0].message, /status must be one of/);
+});
+
+test('review queue is fail-closed (503) without a database', async () => {
+  await ready;
+  process.env.ADMIN_API_KEY = MOD_ADMIN_KEY;
+  const res = await fetch(`${BASE}/api/moderation/reports?status=flagged`, {
+    headers: { 'X-Admin-Key': MOD_ADMIN_KEY },
+  });
+  assert.equal(res.status, 503);
+});
+
+test('hide/clear actions require admin auth (401 without a key)', async () => {
+  await ready;
+  process.env.ADMIN_API_KEY = MOD_ADMIN_KEY;
+  for (const action of ['hide', 'clear']) {
+    const res = await fetch(`${BASE}/api/moderation/reports/rpt_1234567890/${action}`, { method: 'POST' });
+    assert.equal(res.status, 401, `${action} without key`);
+  }
+});
+
+test('hide/clear actions reject an invalid report id (400)', async () => {
+  await ready;
+  process.env.ADMIN_API_KEY = MOD_ADMIN_KEY;
+  for (const action of ['hide', 'clear']) {
+    const res = await fetch(`${BASE}/api/moderation/reports/bad%20id%21/${action}`, {
+      method: 'POST', headers: { 'X-Admin-Key': MOD_ADMIN_KEY },
+    });
+    assert.equal(res.status, 400, `${action} invalid id`);
+  }
+});
