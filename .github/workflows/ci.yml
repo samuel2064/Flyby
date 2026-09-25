@@ -127,6 +127,99 @@ jobs:
           kill $SERVER2_PID 2>/dev/null || true
           echo "Admin delete contract OK"
 
+  moderation-e2e:
+    name: Moderation end-to-end (TIR-325)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: flyby
+          POSTGRES_PASSWORD: flyby
+          POSTGRES_DB: flyby
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U flyby -d flyby"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - working-directory: apps/api
+        name: Install dependencies
+        run: npm ci --no-audit --no-fund || npm install --no-audit --no-fund
+
+      - working-directory: apps/api
+        name: Apply migrations
+        env:
+          DATABASE_URL: postgresql://flyby:flyby@localhost:5432/flyby?schema=public
+        run: npx prisma migrate deploy
+
+      - working-directory: apps/api
+        name: Verify flag -> queue -> hide -> clear against a real database
+        env:
+          DATABASE_URL: postgresql://flyby:flyby@localhost:5432/flyby?schema=public
+          ADMIN_API_KEY: ci-admin-key
+          PORT: 3790
+        run: |
+          node server.js &
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:3790/api/health >/dev/null && break
+            sleep 1
+          done
+
+          # 1. Create a report
+          ID=$(curl -sf -X POST -H "Content-Type: application/json" \
+            -d '{"airport":"JFK","waitMinutes":42,"checkpoint":"Main"}' \
+            http://127.0.0.1:3790/api/wait-times | node -p "JSON.parse(require('fs').readFileSync(0)).id")
+          echo "created $ID"
+
+          # Report lands in the public list before flagging
+          curl -sf "http://127.0.0.1:3790/api/wait-times?airport=JFK" | grep -q '"waitMinutes":42'
+
+          # 2. Flag it -> 201 + moderationStatus flagged
+          curl -sf -X POST -H "Content-Type: application/json" -H "X-Admin-Key: ci-admin-key" \
+            -d '{"reason":"ci e2e"}' -o /tmp/f1.json "http://127.0.0.1:3790/api/reports/$ID/flag" 2>/dev/null || true
+          # Flag is a PUBLIC endpoint: no admin key required
+          code=$(curl -s -o /tmp/f1.json -w '%{http_code}' -X POST -H "Content-Type: application/json" \
+            -d '{"reason":"ci e2e"}' "http://127.0.0.1:3790/api/reports/$ID/flag")
+          if [ "$code" != "201" ]; then echo "flag expected 201, got $code"; cat /tmp/f1.json; exit 1; fi
+          grep -q '"moderationStatus":"flagged"' /tmp/f1.json
+
+          # 3. Queue requires the admin key
+          code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:3790/api/moderation/reports?status=flagged")
+          if [ "$code" != "401" ]; then echo "queue without key expected 401, got $code"; exit 1; fi
+          curl -sf -H "X-Admin-Key: ci-admin-key" "http://127.0.0.1:3790/api/moderation/reports?status=flagged" -o /tmp/q1.json
+          grep -q "$ID" /tmp/q1.json
+          # Redaction: the queue must not leak the reporter field
+          if grep -q '"reporter"' /tmp/q1.json; then echo "reporter leaked in queue"; exit 1; fi
+
+          # 4. Flagged-but-unactioned report still counts in public surfaces
+          curl -sf "http://127.0.0.1:3790/api/wait-times?airport=JFK" | grep -q '"waitMinutes":42'
+          code=$(curl -s -X POST -o /dev/null -w '%{http_code}' "http://127.0.0.1:3790/api/moderation/reports/$ID/hide")
+          if [ "$code" != "401" ]; then echo "hide without key expected 401, got $code"; exit 1; fi
+          curl -sf -X POST -H "X-Admin-Key: ci-admin-key" "http://127.0.0.1:3790/api/moderation/reports/$ID/hide" -o /tmp/h1.json
+          grep -q '"moderationStatus":"hidden"' /tmp/h1.json
+
+          # 5. Hidden report drops out of every public surface (cache invalidated)
+          if curl -sf "http://127.0.0.1:3790/api/wait-times?airport=JFK" | grep -q '"waitMinutes":42'; then
+            echo "hidden report still visible in public list"; exit 1
+          fi
+          curl -sf "http://127.0.0.1:3790/api/airports/JFK/wait-stats" -o /tmp/s1.json
+          if grep -q '"sampleSize":1' /tmp/s1.json; then echo "hidden report still counted in stats"; exit 1; fi
+
+          # 6. Clear restores it
+          curl -sf -X POST -H "X-Admin-Key: ci-admin-key" "http://127.0.0.1:3790/api/moderation/reports/$ID/clear" -o /tmp/c1.json
+          grep -q '"moderationStatus":"none"' /tmp/c1.json
+          curl -sf "http://127.0.0.1:3790/api/wait-times?airport=JFK" | grep -q '"waitMinutes":42'
+          echo "Moderation end-to-end OK"
+
   docker-build:
     name: Docker build validation
     runs-on: ubuntu-latest
