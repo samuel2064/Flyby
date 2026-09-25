@@ -83,16 +83,20 @@ async function attempt(n) {
 
     // PWA contract (TIR-323 follow-on): the manifest is only half of
     // installability; the shell must keep loading with the network gone -
-    // airport WiFi is exactly that. Navigate away-and-back with the network
-    // offline and require the shell to still mount its controls.
+    // airport WiFi is exactly that. A service worker only caches what it was
+    // CONTROLLING during (the first load predates control), so model the real
+    // traveler's second visit: activate, reload once online (assets cached
+    // under SW control), then reload offline and require the shell to mount.
     await page.waitForFunction(
       () => navigator.serviceWorker?.controller != null,
       { timeout: 30_000 },
     )
+    await page.reload({ waitUntil: 'domcontentloaded' })
+    await page.waitForSelector('article', { timeout: 60_000 })
     await page.context().setOffline(true)
     await page.reload({ waitUntil: 'domcontentloaded' })
     await page.waitForSelector('#airport-search', { timeout: 30_000 })
-    console.log('  offline: shell mounted with the network down')
+    console.log('  offline: shell cached by the SW, mounted with the network down')
     await page.context().setOffline(false)
 
     console.log(`[attempt ${n}] all live web checks passed`)
