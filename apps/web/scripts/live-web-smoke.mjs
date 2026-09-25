@@ -80,6 +80,21 @@ async function attempt(n) {
     console.log(`  ATL: ${knownNames.length} known checkpoints listed`)
 
     if (errors.length > 0) fail(`console errors: ${errors.join(' | ')}`)
+
+    // PWA contract (TIR-323 follow-on): the manifest is only half of
+    // installability; the shell must keep loading with the network gone -
+    // airport WiFi is exactly that. Navigate away-and-back with the network
+    // offline and require the shell to still mount its controls.
+    await page.waitForFunction(
+      () => navigator.serviceWorker?.controller != null,
+      { timeout: 30_000 },
+    )
+    await page.context().setOffline(true)
+    await page.reload({ waitUntil: 'domcontentloaded' })
+    await page.waitForSelector('#airport-search', { timeout: 30_000 })
+    console.log('  offline: shell mounted with the network down')
+    await page.context().setOffline(false)
+
     console.log(`[attempt ${n}] all live web checks passed`)
     return
   } finally {

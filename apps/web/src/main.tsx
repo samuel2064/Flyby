@@ -8,3 +8,11 @@ createRoot(document.getElementById('root') as HTMLElement).render(
     <App />
   </StrictMode>,
 )
+
+// PWA service worker: offline shell reload + installable. Registration is
+// fire-and-forget - the app must never crash because caching failed.
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(() => {})
+  })
+}
