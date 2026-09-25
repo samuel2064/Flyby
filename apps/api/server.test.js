@@ -1382,3 +1382,49 @@ test('hide/clear actions reject an invalid report id (400)', async () => {
     assert.equal(res.status, 400, `${action} invalid id`);
   }
 });
+
+// --- Report rate limiting: 30s per identity, Retry-After surfaced --------------
+// The trust surface relies on this window; it had zero coverage until now.
+
+const postWaitTime = (identity, minutes = 11) =>
+  fetch(`${BASE}/api/wait-times`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-User-Id': identity },
+    body: JSON.stringify({ airport: 'JFK', checkpoint: 'Main', waitMinutes: minutes }),
+  });
+
+test('rate limiter: second report within 30s from the same identity answers 429 with Retry-After', async () => {
+  await ready;
+  const first = await postWaitTime('ratelimit-flow-a');
+  assert.equal(first.status, 201);
+  const second = await postWaitTime('ratelimit-flow-a');
+  assert.equal(second.status, 429);
+  const retryAfter = second.headers.get('Retry-After');
+  assert.ok(retryAfter !== null, '429 without Retry-After breaks the client countdown');
+  const seconds = parseInt(retryAfter, 10);
+  assert.ok(seconds >= 1 && seconds <= 30, `Retry-After ${seconds} within the 30s window`);
+  const body = await second.json();
+  assert.ok(Array.isArray(body.errors) && body.errors.some((e) => e.field === 'rateLimit'));
+});
+
+test('rate limiter is per-identity, not global', async () => {
+  await ready;
+  const a = await postWaitTime('ratelimit-flow-b', 12);
+  assert.equal(a.status, 201);
+  const b = await postWaitTime('ratelimit-flow-c', 13);
+  assert.equal(b.status, 201, 'a different identity must not inherit the throttle');
+});
+
+test('rate limiter buckets identities independently: aliased report body fields work too', async () => {
+  await ready;
+  const alias = await fetch(`${BASE}/api/wait-times`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-User-Id': 'ratelimit-flow-d' },
+    body: JSON.stringify({ airport: 'jfk', waitTimeMinutes: 9, timestamp: new Date().toISOString() }),
+  });
+  assert.equal(alias.status, 201, 'waitTimeMinutes alias + lowercase airport accepted');
+  const aliasBody = await alias.json();
+  assert.equal(aliasBody.airport, 'JFK', 'canonical uppercase code echoed');
+  const second = await postWaitTime('ratelimit-flow-d');
+  assert.equal(second.status, 429, 'identity throttle applies across write paths');
+});
