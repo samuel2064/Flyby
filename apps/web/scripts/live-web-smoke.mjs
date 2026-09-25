@@ -79,6 +79,21 @@ async function attempt(n) {
     }
     console.log(`  ATL: ${knownNames.length} known checkpoints listed`)
 
+    // Report sheet contract (zero writes): opening the sheet from the empty
+    // state must yield a picker populated with the airport's real checkpoints
+    // and a submit-affordance gated on them. Close without submitting - no
+    // report is ever written by this probe.
+    await page.click('[data-testid="empty-report-button"]')
+    await page.waitForSelector('[data-testid="checkpoint-picker"]', { timeout: 15_000, state: 'visible' })
+    const pickerOptions = await page.locator('[data-testid="checkpoint-picker"] option').allTextContents()
+    if (pickerOptions.length < 1) fail('checkpoint picker opened with zero options')
+    if (!pickerOptions.some((o) => o.includes('Domestic'))) {
+      fail(`checkpoint picker options mismatch ATL data: ${JSON.stringify(pickerOptions.slice(0, 3))}`)
+    }
+    console.log(`  ATL picker: ${pickerOptions.length} options (write path usable, no report written)`)
+    await page.locator('[aria-label="Close"]').click()
+    await page.waitForSelector('[data-testid="checkpoint-picker"]', { state: 'detached', timeout: 15_000 })
+
     if (errors.length > 0) fail(`console errors: ${errors.join(' | ')}`)
 
     // PWA contract (TIR-323 follow-on): the manifest is only half of
