@@ -102,6 +102,17 @@ jobs:
           fi
           echo "OK    POST /api/wait-times empty body -> 400 with errors[] (write path guarded)"
 
+          # Aggregation endpoints (TIR-321/322): exist live and stay aggregate-only
+          probe "/api/wait-times/summary" '"airportCount"'
+          probe "/api/airports/JFK/wait-stats" '"airport":"JFK"'
+          code=$(curl -s -o /tmp/stats.json -w '%{http_code}' --max-time 90 "$BASE_URL/api/airports/JFK/wait-stats" || echo 000)
+          if grep -q '"userId"\|"p256dh"\|"auth"\|"endpoint"' /tmp/stats.json; then
+            echo "Response body:"
+            head -c 400 /tmp/stats.json || true
+            fail "wait-stats leaks identifying fields - TIR-309 class defect"
+          fi
+          echo "OK    /api/airports/JFK/wait-stats -> $code (aggregate-only)"
+
           echo "All live smoke checks passed"
 
   live-web-smoke:
