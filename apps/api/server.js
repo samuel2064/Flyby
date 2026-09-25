@@ -115,12 +115,13 @@ function sseHandler(req, res) {
 
 // Fan an accepted report out to matching SSE clients. Never throws: a dead
 // socket must not break the 201 report response.
-function broadcastWaitTime({ airport, checkpoint, waitMinutes, reportedAt }) {
+function broadcastWaitTime({ id, airport, checkpoint, waitMinutes, reportedAt }) {
   for (const [client, subscribedAirport] of sseClients) {
     if (subscribedAirport && airport && subscribedAirport !== airport) continue;
     try {
       sseWrite(client, {
         type: 'wait-time-update',
+        id,
         airport,
         checkpoint,
         waitMinutes,
@@ -164,6 +165,9 @@ app.get('/api/wait-times', async (req, res) => {
       });
       return res.json(
         rows.map((r) => ({
+          // Opaque report id (rpt_*) exposed so clients can target
+          // /api/reports/:id/flag (TIR-332). Not a userId - TIR-309 safe.
+          id: r.id,
           airport: r.airport,
           checkpoint: r.checkpoint,
           waitMinutes: r.waitMinutes,
@@ -265,6 +269,7 @@ const reportHandler = async (req, res) => {
   // clients watching this airport. Only real reports flow - never fabricated
   // values.
   broadcastWaitTime({
+    id,
     airport: airportCode,
     checkpoint: checkpointName,
     waitMinutes: waitMinutesValue,
