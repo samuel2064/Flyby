@@ -70,6 +70,15 @@ async function attempt(n) {
     await page.waitForSelector('[data-testid="empty-report-button"]', { timeout: 45_000, state: 'visible' })
     console.log('  ATL: search result + empty-state report button present')
 
+    // TIR-326 companion: the empty state must list the real checkpoints so a
+    // traveler knows what to look for - the funnel affordance, not a dead end.
+    const knownNames = await page.locator('[data-testid="known-checkpoints"] li').allTextContents()
+    if (knownNames.length < 1) fail('ATL empty state lists no known checkpoints')
+    if (!knownNames.some((n) => n.includes('Domestic'))) {
+      fail(`ATL known-checkpoints list does not look like ATL data: ${JSON.stringify(knownNames.slice(0, 3))}`)
+    }
+    console.log(`  ATL: ${knownNames.length} known checkpoints listed`)
+
     if (errors.length > 0) fail(`console errors: ${errors.join(' | ')}`)
     console.log(`[attempt ${n}] all live web checks passed`)
     return

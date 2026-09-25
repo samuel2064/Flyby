@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { DEFAULT_AIRPORT, type Airport } from './data/airports'
+import { DEFAULT_AIRPORT, checkpointOptions, type Airport } from './data/airports'
 import { useWaitTimes, formatRelativeTime } from './hooks/useWaitTimes'
 import { useForecasts } from './hooks/useForecasts'
 import { buildBestByCheckpoint } from './lib/forecastChip'
@@ -132,6 +132,7 @@ export default function App() {
                 <p className="text-sm font-semibold text-slate-900">
                   No checkpoints reported at {airport.code} yet.
                 </p>
+                <CheckpointList airportCode={airport.code} />
                 <p className="mt-1 text-xs text-slate-500">Be the first to report a wait time.</p>
                 <button
                   type="button"
@@ -159,5 +160,29 @@ export default function App() {
         onReported={refresh}
       />
     </div>
+  )
+}
+
+// Empty-state context: an airport with zero reports is the funnel start, not
+// a dead end - show its real checkpoint list (shared data file, no API call)
+// so a traveler can match what the sign over their queue says.
+function CheckpointList({ airportCode }: { airportCode: string }) {
+  const names = checkpointOptions(airportCode)
+  if (names.length === 0) return null
+  return (
+    <ul
+      data-testid="known-checkpoints"
+      className="mt-3 flex flex-wrap justify-center gap-1.5"
+      aria-label={`Checkpoints at ${airportCode}`}
+    >
+      {names.map((name) => (
+        <li
+          key={name}
+          className="rounded-full bg-slate-100 px-2.5 py-1 text-xs text-slate-600"
+        >
+          {name}
+        </li>
+      ))}
+    </ul>
   )
 }
