@@ -113,6 +113,7 @@ interface BarDatum {
 
 function BarChart({ title, buckets }: { title: string; buckets: BarDatum[] }) {
   const max = Math.max(1, ...buckets.map((b) => b.bucket.averageMinutes ?? 0))
+  const AREA_PX = 128 // matches h-32
   const summaryText = buckets
     .filter((b) => b.bucket.averageMinutes !== null)
     .map((b) => `${b.label}: ${formatAverage(b.bucket.averageMinutes)}`)
@@ -123,21 +124,34 @@ function BarChart({ title, buckets }: { title: string; buckets: BarDatum[] }) {
       <p className="sr-only">
         {title}. {summaryText === '' ? 'No data yet.' : summaryText}
       </p>
-      <div aria-hidden="true" className="mt-3 flex h-32 items-end gap-1">
-        {buckets.map((b) => {
-          const v = b.bucket.averageMinutes
-          const heightPct = v === null ? 0 : Math.max(4, (v / max) * 100)
-          return (
-            <div key={b.key} className="flex min-w-0 flex-1 flex-col items-center gap-1">
-              <span className="text-[10px] text-slate-500">{v === null ? '' : formatAverage(v).replace(' min', '')}</span>
+      <div aria-hidden="true" className="mt-3">
+        <div className="flex items-end gap-1" style={{ height: `${AREA_PX}px` }}>
+          {buckets.map((b) => {
+            const v = b.bucket.averageMinutes
+            const heightPx = v === null ? 3 : Math.max(4, Math.round((v / max) * AREA_PX))
+            return (
               <div
-                className={`w-full rounded-t ${v === null ? 'bg-slate-100' : 'bg-brand-500/80'}`}
-                style={{ height: `${v === null ? 4 : heightPct}%` }}
+                key={b.key}
+                title={`${b.label}: ${formatAverage(v)}`}
+                className={`min-w-0 flex-1 rounded-t ${v === null ? 'bg-slate-100' : 'bg-brand-500/80'}`}
+                style={{ height: `${heightPx}px` }}
               />
-              <span className="text-[10px] text-slate-400">{b.label}</span>
-            </div>
-          )
-        })}
+            )
+          })}
+        </div>
+        <div className="mt-1 flex gap-1">
+          {buckets.map((b) => {
+            const v = b.bucket.averageMinutes
+            return (
+              <div key={b.key} className="min-w-0 flex-1 text-center">
+                <p className="truncate text-[10px] text-slate-500">
+                  {v === null ? '' : formatAverage(v).replace(' min', '')}
+                </p>
+                <p className="truncate text-[10px] text-slate-400">{b.label}</p>
+              </div>
+            )
+          })}
+        </div>
       </div>
     </figure>
   )
