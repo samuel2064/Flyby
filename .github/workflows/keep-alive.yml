@@ -1,0 +1,41 @@
+name: API keep-alive
+
+# TIR-341: Render free-tier instances spin down after ~15 min idle and the
+# next request eats a 20-30s cold start - unacceptable for a live-wait-time
+# product. This workflow pings the API roughly every 5 minutes so the
+# instance stays warm.
+#
+# Why two crons: GitHub scheduled workflows are best-effort and often run
+# late; a single */15 schedule (like live-smoke.yml) leaves spin-down gaps.
+# Two staggered */10 schedules hedge the delay jitter. These pings are
+# intentionally tiny (health + summary) so they cost almost nothing and
+# never fail the build - a cold start just means a slow ping.
+#
+# If we move to a paid Render instance (no spin-down) or an external
+# monitor (UptimeRobot / cron-job.org), delete this workflow.
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+    - cron: '5-59/10 * * * *'
+  workflow_dispatch:
+
+env:
+  BASE_URL: https://flyby-api.onrender.com
+
+jobs:
+  ping:
+    name: Ping API to keep the instance warm
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping /api/health
+        # Always exit 0: keep-alive misses must not page anyone. The
+        # live-smoke workflow owns failure detection.
+        run: |
+          code=$(curl -s -o /dev/null --max-time 45 -w '%{http_code}' "$BASE_URL/api/health" || echo 000)
+          echo "keep-alive /api/health -> HTTP $code"
+
+      - name: Ping /api/wait-times/summary (warm the aggregation path)
+        run: |
+          code=$(curl -s -o /dev/null --max-time 45 -w '%{http_code}' "$BASE_URL/api/wait-times/summary" || echo 000)
+          echo "keep-alive /api/wait-times/summary -> HTTP $code"
