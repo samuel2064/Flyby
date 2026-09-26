@@ -3,7 +3,9 @@ import { getWaitTimesSummary } from '../api/summary'
 import type { AirportSummary } from '../api/summary'
 import {
   filterAirports,
+  formatAge,
   formatMinutes,
+  isStale,
   severityFor,
   sortBySeverity,
   SEVERITY_SPECS,
@@ -14,7 +16,9 @@ const AUTO_REFRESH_MS = 60_000
 type FetchState = 'loading' | 'ready' | 'error'
 
 interface DashboardProps {
-  onSelectAirport: (code: string) => void
+  // Passes the whole summary row: the drill needs latestReportedAt for its
+  // staleness indicator (TIR-343) and the stats endpoint does not carry it.
+  onSelectAirport: (airport: AirportSummary) => void
 }
 
 // Landing dashboard (TIR-317): severity-bucketed overview of every tracked
@@ -107,12 +111,14 @@ export function Dashboard({ onSelectAirport }: DashboardProps) {
           {visible.map((a) => {
             const severity = severityFor(a.latestWaitMinutes)
             const spec = SEVERITY_SPECS[severity]
+            const stale = isStale(a.latestReportedAt)
+            const age = formatAge(a.latestReportedAt)
             return (
               <li key={a.airport}>
                 <button
                   type="button"
-                  onClick={() => onSelectAirport(a.airport)}
-                  aria-label={`${a.airportName}: ${spec.label}, latest wait ${formatMinutes(a.latestWaitMinutes)}, ${a.sampleSize} reports. View details.`}
+                  onClick={() => onSelectAirport(a)}
+                  aria-label={`${a.airportName}: ${spec.label}, latest wait ${formatMinutes(a.latestWaitMinutes)} reported ${age}${stale && a.latestReportedAt ? ' (stale)' : ''}, ${a.sampleSize} reports. View details.`}
                   className="flex min-h-11 w-full items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:border-brand-500/50 hover:shadow focus:outline-none focus:ring-2 focus:ring-brand-500/40"
                 >
                   <div className="min-w-0">
@@ -124,12 +130,27 @@ export function Dashboard({ onSelectAirport }: DashboardProps) {
                         <span aria-hidden="true" className={`h-2 w-2 rounded-full ${spec.badgeClass}`} />
                         {spec.label}
                       </span>
+                      {stale && severity !== 'no-data' && (
+                        <span
+                          data-testid="stale-badge"
+                          className="inline-flex items-center rounded-full border border-slate-300 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-500"
+                        >
+                          Stale
+                        </span>
+                      )}
                     </div>
                     <p className="mt-0.5 truncate text-xs text-slate-500">{a.airportName}</p>
                   </div>
                   <div className="shrink-0 text-right">
-                    <p className="text-lg font-bold text-slate-900">{formatMinutes(a.latestWaitMinutes)}</p>
-                    <p className="text-xs text-slate-500">
+                    {/* TIR-343: stale readings are de-emphasized and always
+                        carry their age - never presented as fresh. */}
+                    <p className={`text-lg font-bold ${stale ? 'text-slate-400' : 'text-slate-900'}`}>
+                      {formatMinutes(a.latestWaitMinutes)}
+                    </p>
+                    <p className={`text-xs ${stale ? 'font-medium text-slate-500' : 'text-slate-500'}`}>
+                      reported {age}
+                    </p>
+                    <p className="text-[10px] text-slate-400">
                       {a.sampleSize} report{a.sampleSize === 1 ? '' : 's'}
                     </p>
                   </div>

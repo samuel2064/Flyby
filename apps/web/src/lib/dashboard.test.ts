@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import {
   filterAirports,
+  formatAge,
   formatAverage,
   formatMinutes,
+  isStale,
   severityFor,
   sortBySeverity,
+  STALE_AFTER_MS,
 } from './dashboard'
 import type { AirportSummary } from '../api/summary'
 
@@ -96,5 +99,33 @@ describe('formatters', () => {
     expect(formatAverage(null)).toBe('—')
     expect(formatAverage(28.5)).toBe('28.5 min')
     expect(formatAverage(15)).toBe('15 min')
+  })
+})
+
+describe('staleness (TIR-343)', () => {
+  const now = Date.parse('2026-09-26T12:00:00Z')
+
+  it('marks reports older than 3h as stale, fresh ones not', () => {
+    expect(isStale('2026-09-26T10:00:00Z', now)).toBe(false) // 2h old
+    expect(isStale('2026-09-26T08:59:59Z', now)).toBe(true) // just over 3h
+    expect(isStale('2026-09-25T02:18:38Z', now)).toBe(true) // ~34h old (QA repro)
+  })
+
+  it('treats null/garbage timestamps as stale (no fake freshness)', () => {
+    expect(isStale(null, now)).toBe(true)
+    expect(isStale('not-a-date', now)).toBe(true)
+  })
+
+  it('STALE_AFTER_MS is 3 hours, matching the trend window', () => {
+    expect(STALE_AFTER_MS).toBe(3 * 60 * 60 * 1000)
+  })
+
+  it('formatAge renders minutes, hours, and days', () => {
+    expect(formatAge('2026-09-26T11:59:40Z', now)).toBe('just now')
+    expect(formatAge('2026-09-26T11:15:00Z', now)).toBe('45m ago')
+    expect(formatAge('2026-09-26T10:55:00Z', now)).toBe('1h ago')
+    expect(formatAge('2026-09-26T02:00:00Z', now)).toBe('10h ago')
+    expect(formatAge('2026-09-24T00:00:00Z', now)).toBe('2d ago')
+    expect(formatAge(null, now)).toBe('no recent report')
   })
 })

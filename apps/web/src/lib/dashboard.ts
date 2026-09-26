@@ -91,3 +91,30 @@ export function formatAverage(minutes: number | null): string {
   if (minutes === null || !Number.isFinite(minutes)) return '—'
   return `${Number(minutes.toFixed(1))} min`
 }
+
+// Staleness (TIR-343): crowd reports decay fast - a wait-time reading older
+// than STALE_AFTER_MS must be visibly de-emphasized, not presented as fresh.
+export const STALE_AFTER_MS = 3 * 60 * 60 * 1000 // 3h, matches the trend window
+
+export function ageMs(reportedAt: string | null, now: number = Date.now()): number | null {
+  if (!reportedAt) return null
+  const t = Date.parse(reportedAt)
+  if (!Number.isFinite(t)) return null
+  return Math.max(0, now - t)
+}
+
+export function isStale(reportedAt: string | null, now: number = Date.now()): boolean {
+  const age = ageMs(reportedAt, now)
+  return age === null || age > STALE_AFTER_MS
+}
+
+export function formatAge(reportedAt: string | null, now: number = Date.now()): string {
+  const age = ageMs(reportedAt, now)
+  if (age === null) return 'no recent report'
+  const minutes = Math.floor(age / 60_000)
+  if (minutes < 1) return 'just now'
+  if (minutes < 60) return `${minutes}m ago`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 48) return `${hours}h ago`
+  return `${Math.floor(hours / 24)}d ago`
+}

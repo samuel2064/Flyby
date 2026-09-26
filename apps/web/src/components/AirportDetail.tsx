@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react'
 import { getAirportWaitStats } from '../api/summary'
-import type { AirportStats, StatsBucket } from '../api/summary'
-import { formatAverage } from '../lib/dashboard'
+import type { AirportStats, AirportSummary, StatsBucket } from '../api/summary'
+import { formatAge, formatAverage, isStale } from '../lib/dashboard'
 import { useLiveRefresh } from '../hooks/useLiveRefresh'
 
 interface AirportDetailProps {
-  code: string
+  // Summary row carries latestReportedAt (stats endpoint does not) - needed
+  // for the staleness indicator (TIR-343).
+  summary: AirportSummary
   onBack: () => void
 }
 
@@ -13,7 +15,8 @@ interface AirportDetailProps {
 // day-of-week CSS bar charts. Bars are divs, not a chart lib, per the
 // WaitHistoryChart no-dependency convention; color is never the sole signal
 // (values are printed next to every bar).
-export function AirportDetail({ code, onBack }: AirportDetailProps) {
+export function AirportDetail({ summary, onBack }: AirportDetailProps) {
+  const code = summary.airport
   const [stats, setStats] = useState<AirportStats | null>(null)
   const [error, setError] = useState(false)
 
@@ -65,7 +68,16 @@ export function AirportDetail({ code, onBack }: AirportDetailProps) {
             {stats.airport} · {stats.airportName}
           </h1>
           <p className="mt-1 text-xs text-slate-500">
-            Based on {stats.sampleSize} crowd report{stats.sampleSize === 1 ? '' : 's'}.
+            Based on {stats.sampleSize} crowd report{stats.sampleSize === 1 ? '' : 's'}; latest reported{' '}
+            {formatAge(summary.latestReportedAt)}.
+            {isStale(summary.latestReportedAt) && summary.latestReportedAt && (
+              <span
+                data-testid="stale-badge"
+                className="ml-2 inline-flex items-center rounded-full border border-slate-300 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-500"
+              >
+                Stale - treat as historical
+              </span>
+            )}
           </p>
 
           <dl className="mt-5 grid grid-cols-3 gap-3">

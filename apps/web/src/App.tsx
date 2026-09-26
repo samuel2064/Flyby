@@ -11,6 +11,7 @@ import { InstallPrompt } from './components/InstallPrompt'
 import { SkeletonCard } from './components/SkeletonCard'
 import { Dashboard } from './components/Dashboard'
 import { AirportDetail } from './components/AirportDetail'
+import type { AirportSummary } from './api/summary'
 
 // Tabs (TIR-317): dashboard is the default landing view; the original
 // search-and-report flow lives under its own tab, untouched.
@@ -18,8 +19,8 @@ type Tab = 'dashboard' | 'search'
 
 export default function App() {
   const [tab, setTab] = useState<Tab>('dashboard')
-  // IATA code once a dashboard card is drilled into; null = overview.
-  const [detailCode, setDetailCode] = useState<string | null>(null)
+  // Summary row once a dashboard card is drilled into; null = overview.
+  const [detailAirport, setDetailAirport] = useState<AirportSummary | null>(null)
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -56,10 +57,10 @@ export default function App() {
 
       <main className="mx-auto max-w-3xl px-4 pb-16 sm:px-6">
         {tab === 'dashboard' ? (
-          detailCode ? (
-            <AirportDetail code={detailCode} onBack={() => setDetailCode(null)} />
+          detailAirport ? (
+            <AirportDetail summary={detailAirport} onBack={() => setDetailAirport(null)} />
           ) : (
-            <Dashboard onSelectAirport={setDetailCode} />
+            <Dashboard onSelectAirport={setDetailAirport} />
           )
         ) : (
           <SearchReportView />
