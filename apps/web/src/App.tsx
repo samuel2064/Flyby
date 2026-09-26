@@ -9,8 +9,73 @@ import { CheckpointCard } from './components/CheckpointCard'
 import { ReportSheet } from './components/ReportSheet'
 import { InstallPrompt } from './components/InstallPrompt'
 import { SkeletonCard } from './components/SkeletonCard'
+import { Dashboard } from './components/Dashboard'
+import { AirportDetail } from './components/AirportDetail'
+
+// Tabs (TIR-317): dashboard is the default landing view; the original
+// search-and-report flow lives under its own tab, untouched.
+type Tab = 'dashboard' | 'search'
 
 export default function App() {
+  const [tab, setTab] = useState<Tab>('dashboard')
+  // IATA code once a dashboard card is drilled into; null = overview.
+  const [detailCode, setDetailCode] = useState<string | null>(null)
+
+  return (
+    <div className="min-h-screen bg-slate-50">
+      <header className="bg-brand-900 text-white">
+        <div className="mx-auto flex max-w-3xl items-center justify-between gap-4 px-4 py-3 sm:px-6">
+          <div className="flex items-center gap-2">
+            <svg aria-hidden="true" className="h-6 w-6" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M21 16v-2l-8-2.5V6.5a1.5 1.5 0 0 0-3 0v5L2 14v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5L21 16Z" />
+            </svg>
+            <span className="text-lg font-bold tracking-tight">Flyby</span>
+          </div>
+          <nav aria-label="Views" className="flex gap-1 rounded-full bg-white/10 p-1">
+            {(
+              [
+                ['dashboard', 'Dashboard'],
+                ['search', 'Search & Report'],
+              ] as const
+            ).map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                aria-pressed={tab === value}
+                onClick={() => setTab(value)}
+                className={`min-h-11 rounded-full px-3 text-xs font-semibold transition focus:outline-none focus:ring-2 focus:ring-white/40 sm:min-h-0 sm:px-4 ${
+                  tab === value ? 'bg-white text-brand-900' : 'text-white/80 hover:text-white'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </nav>
+        </div>
+      </header>
+
+      <main className="mx-auto max-w-3xl px-4 pb-16 sm:px-6">
+        {tab === 'dashboard' ? (
+          detailCode ? (
+            <AirportDetail code={detailCode} onBack={() => setDetailCode(null)} />
+          ) : (
+            <Dashboard onSelectAirport={setDetailCode} />
+          )
+        ) : (
+          <SearchReportView />
+        )}
+
+        <p className="mt-10 text-center text-xs text-slate-400">
+          Flyby — crowdsourced airport security wait times
+        </p>
+      </main>
+
+      <InstallPrompt />
+    </div>
+  )
+}
+
+function SearchReportView() {
   const [airport, setAirport] = useState<Airport>(DEFAULT_AIRPORT)
   // undefined = closed, null = picker mode (traveler picks the checkpoint),
   // string = fixed checkpoint from a card.
@@ -27,30 +92,8 @@ export default function App() {
   )
 
   return (
-    <div className="min-h-screen bg-slate-50">
-      <header className="bg-brand-900 text-white">
-        <div className="mx-auto flex max-w-3xl items-center justify-between gap-4 px-4 py-3 sm:px-6">
-          <div className="flex items-center gap-2">
-            <svg aria-hidden="true" className="h-6 w-6" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M21 16v-2l-8-2.5V6.5a1.5 1.5 0 0 0-3 0v5L2 14v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5L21 16Z" />
-            </svg>
-            <span className="text-lg font-bold tracking-tight">Flyby</span>
-          </div>
-          <span
-            aria-live="polite"
-            className="inline-flex items-center gap-1.5 rounded-full bg-white/10 px-2.5 py-1 text-xs font-semibold"
-          >
-            <span
-              aria-hidden="true"
-              className={`h-2 w-2 rounded-full ${live ? 'bg-emerald-400' : 'bg-slate-400'}`}
-            />
-            {live ? 'Live' : 'Polling'}
-          </span>
-        </div>
-      </header>
-
-      <main className="mx-auto max-w-3xl px-4 pb-16 sm:px-6">
-        <section className="pt-8">
+    <>
+      <section className="pt-8">
           <h1 className="text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">
             Security wait times, live
           </h1>
@@ -67,6 +110,15 @@ export default function App() {
             <h2 className="text-lg font-semibold text-slate-900">
               {airport.code} · {airport.city}
             </h2>
+            <span
+              className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600"
+            >
+              <span
+                aria-hidden="true"
+                className={`h-2 w-2 rounded-full ${live ? 'bg-emerald-400' : 'bg-slate-400'}`}
+              />
+              {live ? 'Live' : 'Polling'}
+            </span>
             <p className="text-xs text-slate-500">
               Updated {formatRelativeTime(lastUpdated)}
               {lastUpdated && (
@@ -152,11 +204,6 @@ export default function App() {
           </div>
         </section>
 
-        <p className="mt-10 text-center text-xs text-slate-400">
-          Flyby · crowdsourced airport security wait times
-        </p>
-      </main>
-
       <ReportSheet
         open={reportTarget !== undefined}
         airportCode={airport.code}
@@ -164,8 +211,7 @@ export default function App() {
         onClose={() => setReportTarget(undefined)}
         onReported={refresh}
       />
-      <InstallPrompt />
-    </div>
+    </>
   )
 }
 
