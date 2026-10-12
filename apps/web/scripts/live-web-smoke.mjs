@@ -33,9 +33,13 @@ async function attempt(n) {
   page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`))
 
   try {
-    console.log(`[attempt ${n}] loading ${BASE} ...`)
-    await page.goto(BASE, { waitUntil: 'domcontentloaded', timeout: 60_000 })
-    await page.waitForSelector('#airport-search', { timeout: 30_000 })
+        console.log(`[attempt ${n}] loading ${BASE} ...`)
+    await page.goto(BASE, { waitUntil: 'networkidle', timeout: 120_000 })
+    await page.waitForFunction(
+      () => document.getElementById('root') !== null,
+      { timeout: 60_000 }
+    )
+    await page.waitForSelector('#airport-search', { state: 'visible', timeout: 60_000 })
 
     // Default airport (SEA): checkpoint cards must render
     await page.waitForSelector('article', { timeout: 60_000 })
