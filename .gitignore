@@ -1,0 +1,20 @@
+node_modules/
+dist/
+test-output/
+playwright-report/
+test-results/
+*.db
+*.db-journal
+.env
+.env.local
+coverage/
+.DS_Store
+*.log
+
+# Scratch/working files from local agent sessions (put scratch output in tmp/)
+/tmp/
+*.backup
+packages/*/tmp_*.txt
+
+# Legacy standalone web directory (moved to packages/web)
+/web/

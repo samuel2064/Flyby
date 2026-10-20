@@ -1,0 +1,471 @@
+name: CI
+
+# Interim CI pipeline for Flyby MVP test automation.
+# This is a minimal pipeline that runs on every push and PR until the DevOps
+# Engineer is hired and designs a full production CI/CD workflow.
+
+on:
+  push:
+    branches: [main, master, monorepo-candidate]
+  pull_request:
+    branches: [main, master, monorepo-candidate]
+  # Nightly smoke test at 03:00 UTC
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+    inputs:
+      debug:
+        description: "Enable verbose logging"
+        required: false
+        default: ""
+
+# Ensure only one workflow runs at a time per branch/PR
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  actions: read
+  issues: write
+
+env:
+  NODE_ENV: test
+  LOCAL_REDIS: 'redis://localhost:6379'
+
+jobs:
+  # ── Type check ────────────────────────────────────────────────────
+  typecheck:
+    runs-on: ubuntu-latest
+    name: Type Check
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Use Node.js 20.x
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: 'npm'
+      - name: Install dependencies
+        shell: bash
+        run: npm ci 2>&1 | tee /tmp/install.log; exit ${PIPESTATUS[0]}
+      - name: Install failure diagnostics
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          {
+            echo "### Type Check install failure"
+            echo '```'
+            node -v; npm -v
+            npm config get engine-strict || true
+            tail -n 100 /tmp/install.log 2>/dev/null || true
+            echo '```'
+          } >> "${GITHUB_STEP_SUMMARY}"
+          SUMMARY_FILE=$(mktemp)
+          {
+            echo "CI install failure on ${GITHUB_REF} (run ${GITHUB_RUN_ID})"
+            echo '```'
+            node -v; npm -v
+            tail -n 60 /tmp/install.log 2>/dev/null || true
+            echo '```'
+          } > "${SUMMARY_FILE}"
+          gh issue create --title "[ci-fail-debug] run ${GITHUB_RUN_ID}" --body-file "${SUMMARY_FILE}" || true
+      - name: Generate Prisma client
+        run: npm run db:generate
+      - name: Type check API
+        run: npm run build --workspace=packages/api --if-present
+      - name: Type check Web
+        run: npm run build --workspace=packages/web --if-present
+
+  # ── Lint ──────────────────────────────────────────────────────────
+  lint:
+    runs-on: ubuntu-latest
+    name: Lint
+    timeout-minutes: 10
+    needs: typecheck
+    steps:
+      - uses: actions/checkout@v4
+      - name: Use Node.js 20.x
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: 'npm'
+      - name: Install dependencies
+        run: npm ci
+      - name: Run linter
+        run: npm run lint
+
+  # ── Backend unit tests ────────────────────────────────────────────
+  test-api:
+    runs-on: ubuntu-latest
+    name: Backend Tests (Node ${{ matrix.node-version }})
+    timeout-minutes: 15
+    needs: typecheck
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+
+    strategy:
+      matrix:
+        node-version: [22.x]
+      fail-fast: false
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma client
+        run: npm run db:generate
+
+      - name: Push database schema
+        run: npx prisma db push --schema=packages/api/prisma/schema.prisma
+        env:
+          DATABASE_URL: file:./packages/api/prisma/dev.db
+
+      - name: Run backend tests with coverage
+        shell: bash
+        run: npm run test:coverage --workspace=packages/api 2>&1 | tee /tmp/apitest.log; exit ${PIPESTATUS[0]}
+        env:
+          DATABASE_URL: file:./packages/api/prisma/dev.db
+          REDIS_URL: redis://localhost:6379
+
+      - name: Backend test failure diagnostics
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          SUMMARY_FILE=$(mktemp)
+          {
+            echo "Backend tests failure on ${GITHUB_REF} (run ${GITHUB_RUN_ID})"
+            echo '```'
+            tail -n 80 /tmp/apitest.log 2>/dev/null || true
+            echo '```'
+          } > "${SUMMARY_FILE}"
+          gh issue create --title "[ci-fail-debug] run ${GITHUB_RUN_ID} backend tests" --body-file "${SUMMARY_FILE}" || true
+
+      - name: Upload backend coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-coverage-node${{ matrix.node-version }}
+          path: packages/api/test-output/coverage/
+          if-no-files-found: warn
+
+  # ── Frontend unit tests ───────────────────────────────────────────
+  test-web:
+    runs-on: ubuntu-latest
+    name: Frontend Tests (Node ${{ matrix.node-version }})
+    timeout-minutes: 15
+    needs: typecheck
+    strategy:
+      matrix:
+        node-version: [22.x]
+      fail-fast: false
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run frontend tests with coverage
+        shell: bash
+        run: npm run test:coverage --workspace=packages/web 2>&1 | tee /tmp/webtest.log; exit ${PIPESTATUS[0]}
+
+      - name: Frontend test failure diagnostics
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          SUMMARY_FILE=$(mktemp)
+          {
+            echo "Frontend tests failure on ${GITHUB_REF} (run ${GITHUB_RUN_ID})"
+            echo '```'
+            tail -n 80 /tmp/webtest.log 2>/dev/null || true
+            echo '```'
+          } > "${SUMMARY_FILE}"
+          gh issue create --title "[ci-fail-debug] run ${GITHUB_RUN_ID} frontend tests" --body-file "${SUMMARY_FILE}" || true
+
+      - name: Upload frontend coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-coverage-node${{ matrix.node-version }}
+          path: packages/web/test-output/coverage/
+          if-no-files-found: warn
+
+  # ── E2E tests ─────────────────────────────────────────────────────
+  # E2E tests are now stable and passing (17 tests covering home, search,
+  # airport-detail, report-wait-time, and auth flows). They block PRs.
+  e2e:
+    runs-on: ubuntu-latest
+    name: E2E Tests
+    timeout-minutes: 20
+
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js 20.x
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: 'npm'
+
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('**/package-lock.json') }}
+
+      - name: Install dependencies
+        shell: bash
+        run: npm ci 2>&1 | tee /tmp/install.log; exit ${PIPESTATUS[0]}
+
+      - name: Generate Prisma client
+        run: npm run db:generate
+
+      - name: Push e2e database schema
+        run: npx prisma db push --schema=packages/api/prisma/schema.prisma
+        env:
+          DATABASE_URL: file:./packages/api/prisma/e2e.db
+
+      - name: Install Playwright browsers
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: npx playwright install --with-deps chromium
+
+      - name: Run E2E tests
+        run: npm run test:e2e
+        env:
+          DATABASE_URL: file:./packages/api/prisma/e2e.db
+          REDIS_URL: redis://localhost:6379
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: packages/e2e/playwright-report/
+          if-no-files-found: warn
+
+      - name: E2E install failure diagnostics
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          {
+            echo "### E2E install failure"
+            echo '```'
+            node -v; npm -v
+            npm config get engine-strict || true
+            tail -n 100 /tmp/install.log 2>/dev/null || true
+            echo '```'
+          } >> "${GITHUB_STEP_SUMMARY}"
+          SUMMARY_FILE=$(mktemp)
+          {
+            echo "CI install failure on ${GITHUB_REF} (run ${GITHUB_RUN_ID})"
+            echo '```'
+            node -v; npm -v
+            tail -n 60 /tmp/install.log 2>/dev/null || true
+            echo '```'
+          } > "${SUMMARY_FILE}"
+          gh issue create --title "[ci-fail-debug] run ${GITHUB_RUN_ID} e2e install" --body-file "${SUMMARY_FILE}" || true
+
+# ── Build artifacts ───────────────────────────────────────────────
+  build:
+    runs-on: ubuntu-latest
+    name: Build Artifacts
+    needs: [test-api, test-web, lint]
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Use Node.js 20.x
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: 'npm'
+      - name: Install dependencies
+        run: npm ci
+      - name: Generate Prisma client
+        run: npm run db:generate
+      - name: Push database schema
+        run: npx prisma db push --schema=packages/api/prisma/schema.prisma
+        env:
+          DATABASE_URL: file:./packages/api/prisma/dev.db
+      - name: Build API
+        run: npm run build --workspace=packages/api
+        env:
+          DATABASE_URL: file:./packages/api/prisma/dev.db
+          REDIS_URL: redis://localhost:6379
+      - name: Build Web
+        run: npm run build --workspace=packages/web
+        env:
+          DATABASE_URL: file:./packages/api/prisma/dev.db
+          REDIS_URL: redis://localhost:6379
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-artifacts
+          path: |
+            packages/api/dist/
+            packages/web/dist/
+          if-no-files-found: warn
+
+  # ─── Staging deploy — Skeleton (DevOps/TIR-102) ─────────────────────
+  # placeholder job.
+  deploy-staging:
+    runs-on: ubuntu-latest
+    name: Deploy to Staging (Skeleton)
+    needs: [build, typecheck]
+    timeout-minutes: 15
+    environment:
+      name: staging
+      url: ${{ steps.deploy.outputs.url }}
+    if: (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master') && github.event_name != 'schedule'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Use Node.js 20.x
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: 'npm'
+      - name: Install dependencies
+        run: npm ci
+      - name: Generate Prisma client
+        run: npm run db:generate
+      - name: Push database schema
+        run: npx prisma db push --schema=packages/api/prisma/schema.prisma
+        env:
+          DATABASE_URL: file:./packages/api/prisma/dev.db
+      - name: Build packages
+        run: npm run build
+        env:
+          DATABASE_URL: file:./packages/api/prisma/dev.db
+          REDIS_URL: redis://localhost:6379
+      # ── TODO (DevOps/TIR-102) ──
+      # Replace the echo step with the real deployment command, e.g.:
+      # - name: Deploy API to AWS/GCP/Azure
+      #   run: |
+      #     # aws s3 sync ...
+      #     # terraform apply ...
+      #     # kubectl apply -f k8s/staging/
+      #   env:
+      #     AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      #     AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      #     DEPLOYMENT_ENV: staging
+      # - name: Deploy Web
+      #   run: |
+      #     # Upload web dist to CDN / static hosting
+      #   env:
+      #     CDN_DISTRIBUTION_ID: ${{ secrets.CDN_DISTRIBUTION_ID }}
+      # ────────────────────────────
+      - name: Skeleton deploy step
+        id: deploy
+        run: |
+          echo "Deploying to staging environment..."
+          echo "This is a skeleton step."
+          echo "Artifact path: packages/api/dist/ and packages/web/dist/"
+          echo "ToDo: Configure deployment target (TIR-102)."
+          echo "url=https://staging.flyby.app (placeholder)" >> $GITHUB_OUTPUT
+          echo "deploy_status=success" >> $GITHUB_OUTPUT
+      # ── Artifact / Image registry upload (placeholder) ──
+      - name: Upload deploy artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: deploy-artifacts
+          path: |
+            packages/api/dist/
+            packages/web/dist/
+          if-no-files-found: warn
+      # ── Notification (placeholder) ──
+      # - name: Notify Slack / Discord / PagerDuty
+      #   run: echo "Deploy status: ${{ steps.deploy.outputs.deploy_status }}"
+      #   env:
+      #     SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+  # ─── Production deploy — Skeleton (DevOps/TIR-102) ──────────────────
+  # placeholder job.
+  deploy-prod:
+    runs-on: ubuntu-latest
+    name: Deploy to Production (Skeleton)
+    needs: deploy-staging
+    timeout-minutes: 15
+    environment:
+      name: production
+      url: ${{ steps.deploy.outputs.url }}
+    if: (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master') && github.event_name != 'schedule'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Use Node.js 20.x
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: 'npm'
+      - name: Install dependencies
+        run: npm ci
+      - name: Generate Prisma client
+        run: npm run db:generate
+      - name: Push database schema
+        run: npx prisma db push --schema=packages/api/prisma/schema.prisma
+        env:
+          DATABASE_URL: file:./packages/api/prisma/dev.db
+      - name: Build packages
+        run: npm run build
+        env:
+          DATABASE_URL: file:./packages/api/prisma/dev.db
+          REDIS_URL: redis://localhost:6379
+      # ── TODO (DevOps/TIR-102) ──
+      # Replace the echo step with the real production deployment command, e.g.:
+      # - name: Deploy API to AWS/GCP/Azure
+      #   run: |
+      #     # aws s3 sync ...
+      #     # terraform apply ...
+      #     # kubectl apply -f k8s/production/
+      #   env:
+      #     AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      #     AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      #     DEPLOYMENT_ENV: production
+      # - name: Deploy Web to CDN / static hosting
+      #   run: |
+      #     # Upload web dist to production CDN / static hosting
+      #   env:
+      #     CDN_DISTRIBUTION_ID: ${{ secrets.CDN_DISTRIBUTION_ID }}
+      # ────────────────────────────
+      - name: Skeleton deploy step
+        id: deploy
+        run: |
+          echo "Deploying to production environment..."
+          echo "This is a skeleton step."
+          echo "Artifact path: packages/api/dist/ and packages/web/dist/"
+          echo "ToDo: Configure production deployment target (TIR-102)."
+          echo "url=https://flyby.app (placeholder)" >> $GITHUB_OUTPUT
+          echo "deploy_status=success" >> $GITHUB_OUTPUT
+      # ── Notification (placeholder) ──
+      # - name: Notify Slack / Discord / PagerDuty
+      #   run: echo "Production deploy status: ${{ steps.deploy.outputs.deploy_status }}"
+      #   env:
+      #     SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}

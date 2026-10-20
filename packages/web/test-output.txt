@@ -1,0 +1,56 @@
+﻿
+[1m[7m[36m RUN [39m[27m[22m [36mv2.1.9 [39m[90mC:/Users/siums/.paperclip/instances/default/workspaces/50d35b5d-c5bf-4e6f-ab78-15a1008ada91/packages/web[39m
+
+ [32mÔ£ô[39m tests/offlineQueue.integration.test.ts [2m([22m[2m5 tests[22m[2m)[22m[90m 5[2mms[22m[39m
+ [32mÔ£ô[39m tests/offlineQueue.test.ts [2m([22m[2m9 tests[22m[2m)[22m[90m 8[2mms[22m[39m
+ [32mÔ£ô[39m tests/ReportModal.test.tsx [2m([22m[2m3 tests[22m[2m)[22m[90m 53[2mms[22m[39m
+node.exe : [90mstderr[2m | tests/Search.test.tsx[2m > [22m[2mSearch page[2m > [22m[2mrenders search input and 
+button
+At line:1 char:1
++ & "C:\Program Files\nodejs/node.exe" "C:\Program Files\nodejs/node_mo ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ([90mstderr[2m...nput and button:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+[22m[39mÔÜá´©Å React Router Future Flag Warning: React Router will begin wrapping state updates in 
+`React.startTransition` in v7. You can use the `v7_startTransition` future flag to opt-in early. For more information, 
+see https://reactrouter.com/v6/upgrading/future#v7_starttransition.
+ÔÜá´©Å React Router Future Flag Warning: Relative route resolution within Splat routes is changing in v7. You can use 
+the `v7_relativeSplatPath` future flag to opt-in early. For more information, see 
+https://reactrouter.com/v6/upgrading/future#v7_relativesplatpath.
+
+ [32mÔ£ô[39m tests/Search.test.tsx [2m([22m[2m2 tests[22m[2m)[22m[90m 159[2mms[22m[39m
+[90mstderr[2m | tests/Airport.test.tsx[2m > [22m[2mAirport page[2m > [22m[2mrenders skeleton loading state
+[22m[39mÔÜá´©Å React Router Future Flag Warning: React Router will begin wrapping state updates in 
+`React.startTransition` in v7. You can use the `v7_startTransition` future flag to opt-in early. For more information, 
+see https://reactrouter.com/v6/upgrading/future#v7_starttransition.
+ÔÜá´©Å React Router Future Flag Warning: Relative route resolution within Splat routes is changing in v7. You can use 
+the `v7_relativeSplatPath` future flag to opt-in early. For more information, see 
+https://reactrouter.com/v6/upgrading/future#v7_relativesplatpath.
+
+ [32mÔ£ô[39m tests/ErrorBoundary.test.tsx [2m([22m[2m2 tests[22m[2m)[22m[90m 34[2mms[22m[39m
+[90mstderr[2m | tests/Home.test.tsx[2m > [22m[2mHome page[2m > [22m[2mrenders skeleton loading state
+[22m[39mÔÜá´©Å React Router Future Flag Warning: React Router will begin wrapping state updates in 
+`React.startTransition` in v7. You can use the `v7_startTransition` future flag to opt-in early. For more information, 
+see https://reactrouter.com/v6/upgrading/future#v7_starttransition.
+ÔÜá´©Å React Router Future Flag Warning: Relative route resolution within Splat routes is changing in v7. You can use 
+the `v7_relativeSplatPath` future flag to opt-in early. For more information, see 
+https://reactrouter.com/v6/upgrading/future#v7_relativesplatpath.
+
+ [32mÔ£ô[39m tests/Home.test.tsx [2m([22m[2m2 tests[22m[2m)[22m[90m 89[2mms[22m[39m
+ [32mÔ£ô[39m tests/Airport.test.tsx [2m([22m[2m6 tests[22m[2m)[22m[90m 98[2mms[22m[39m
+[90mstderr[2m | tests/Dashboard.test.tsx[2m > [22m[2mDashboard page[2m > [22m[2mrenders skeleton loading state
+[22m[39mÔÜá´©Å React Router Future Flag Warning: React Router will begin wrapping state updates in 
+`React.startTransition` in v7. You can use the `v7_startTransition` future flag to opt-in early. For more information, 
+see https://reactrouter.com/v6/upgrading/future#v7_starttransition.
+ÔÜá´©Å React Router Future Flag Warning: Relative route resolution within Splat routes is changing in v7. You can use 
+the `v7_relativeSplatPath` future flag to opt-in early. For more information, see 
+https://reactrouter.com/v6/upgrading/future#v7_relativesplatpath.
+
+ [32mÔ£ô[39m tests/Dashboard.test.tsx [2m([22m[2m6 tests[22m[2m)[22m[90m 116[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m8 passed[39m[22m[90m (8)[39m
+[2m      Tests [22m [1m[32m35 passed[39m[22m[90m (35)[39m
+[2m   Start at [22m 21:48:48
+[2m   Duration [22m 1.88s[2m (transform 271ms, setup 0ms, collect 1.95s, tests 562ms, environment 6.04s, prepare 1.15s)[22m
+

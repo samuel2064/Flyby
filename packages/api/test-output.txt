@@ -1,0 +1,27 @@
+﻿node.exe : [33mThe CJS build of Vite's Node API is deprecated. See 
+https://vite.dev/guide/troubleshooting.html#vite-cjs-node-api-deprecated for more details.[39m
+At line:1 char:1
++ & "C:\Program Files\nodejs/node.exe" "C:\Program Files\nodejs/node_mo ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ([33mThe CJS bu...e details.[39m:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+
+[1m[7m[36m RUN [39m[27m[22m [36mv2.1.9 [39m[90mC:/Users/siums/.paperclip/instances/default/workspaces/50d35b5d-c5bf-4e6f-ab78-15a1008ada91/packages/api[39m
+
+[90mstdout[2m | tests/seed.test.ts[2m > [22m[2mSeed logic[2m > [22m[2mseed function runs without error
+[22m[39mSeed complete. { airports: [33m0[39m, checkpoints: [33m0[39m }
+
+ [32mÔ£ô[39m tests/seed.test.ts [2m([22m[2m3 tests[22m[2m)[22m[90m 3[2mms[22m[39m
+[90mstdout[2m | tests/api.test.ts
+[22m[39mSeed complete. { airports: [33m51[39m, checkpoints: [33m159[39m }
+
+ [32mÔ£ô[39m tests/api.test.ts [2m([22m[2m47 tests[22m[2m)[22m[33m 7871[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m GET /api/checkpoints/:id/stream[2m > [22mreturns SSE headers for valid checkpoint [33m3022[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m GET /api/checkpoints/stream[2m > [22mreturns SSE headers for global stream [33m3010[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m2 passed[39m[22m[90m (2)[39m
+[2m      Tests [22m [1m[32m50 passed[39m[22m[90m (50)[39m
+[2m   Start at [22m 21:49:10
+[2m   Duration [22m 8.59s[2m (transform 140ms, setup 0ms, collect 405ms, tests 7.87s, environment 0ms, prepare 199ms)[22m
+

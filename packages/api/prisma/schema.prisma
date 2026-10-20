@@ -1,0 +1,139 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url = env("DATABASE_URL")
+}
+
+model User {
+  id String @id @default(uuid())
+  email String @unique
+  passwordHash String
+  displayName String?
+  isPremium Boolean @default(false)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  waitTimes                WaitTime[]
+  notificationSubscriptions NotificationSubscription[]
+
+  @@map("users")
+}
+
+model Airport {
+  id String @id @default(uuid())
+  code String @unique
+  name String
+  city String
+  state String?
+  country String
+  timezone String
+  latitude Float?
+  longitude Float?
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  checkpoints Checkpoint[]
+  notificationSubscriptions NotificationSubscription[]
+
+  @@map("airports")
+}
+
+model Checkpoint {
+  id String @id @default(uuid())
+  airportId String
+  code String
+  name String
+  terminal String?
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  airport Airport @relation(fields: [airportId], references: [id], onDelete: Cascade)
+  waitTimes WaitTime[]
+
+  @@unique([airportId, code])
+  @@map("checkpoints")
+}
+
+model WaitTime {
+  id String @id @default(uuid())
+  checkpointId String @map("checkpoint_id")
+  minutes Int
+  source String // crowd, pattern, official
+  reportType String @default("standard") @map("report_type") // standard, precheck, clear
+  reportedAt DateTime @map("reported_at")
+  userId String? @map("user_id")
+  flagCount Int @default(0) @map("flag_count") // denormalized abuse-flag count; >=3 hides report from traffic math
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  checkpoint Checkpoint @relation(fields: [checkpointId], references: [id], onDelete: Cascade)
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+  flags ReportFlag[]
+
+  @@index([checkpointId, reportedAt])
+  @@index([userId])
+  @@map("wait_times")
+}
+
+model ReportFlag {
+  id String @id @default(uuid())
+  reportId String @map("report_id")
+  reason String // wrong_location, inaccurate, spam, other
+  note String?
+  sessionId String @map("session_id")
+  createdAt DateTime @default(now()) @map("created_at")
+  report WaitTime @relation(fields: [reportId], references: [id], onDelete: Cascade)
+
+  @@unique([reportId, sessionId])
+  @@index([reportId])
+  @@map("report_flags")
+}
+
+model NotificationSubscription {
+  id String @id @default(uuid())
+  endpoint String
+  keys String // JSON: { p256dh: string, auth: string }
+  airportId String
+  userId String?
+  createdAt DateTime @default(now())
+
+  airport Airport @relation(fields: [airportId], references: [id], onDelete: Cascade)
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  logs NotificationLog[]
+
+  @@index([id, createdAt])
+  @@index([airportId, createdAt])
+  @@map("notification_subscriptions")
+}
+
+model NotificationLog {
+  id String @id @default(uuid())
+  subscriptionId String
+  airportId String
+  checkpointId String?
+  alertType String   // threshold | spike | leave_now
+  minutes Int
+  createdAt DateTime @default(now())
+
+  subscription NotificationSubscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+
+  @@index([subscriptionId, createdAt])
+  @@index([airportId, createdAt])
+  @@map("notification_logs")
+}
+
+model NotificationPreference {
+  id String @id @default(uuid())
+  userId String @unique
+  dndEnabled Boolean @default(true)
+  dndStartHour Int @default(22)
+  dndEndHour Int @default(6)
+  thresholdMinutes Int @default(30)
+  spikePercent Int @default(100)
+  leaveNowPercent Int @default(150)
+  rateLimitMinutes Int @default(60)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("notification_preferences")
+}

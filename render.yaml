@@ -1,0 +1,77 @@
+# Flyby monorepo — Render blueprint (TIR-339 / M2)
+#
+# Deploys the MONOREPO as the Option-A deploy target. This is the staging
+# pair first; the prod cutover (M4) flips flyby-api/flyby-web to these
+# definitions only after the M3 byte-compare gate passes and QA signs off
+# (CEO conditions in TIR-339).
+#
+# How to use (DevOps/board lane):
+#   1. The candidate is already pushed: branch `monorepo-candidate` on
+#      github.com/samuel2064/Flyby (clean snapshot, tests green on that tree).
+#   2. In Render: New -> Blueprint -> repo samuel2064/Flyby, branch
+#      `monorepo-candidate`. Render reads this file and creates both services.
+#   3. Fill the sync:false env vars in the dashboard (secrets are not stored
+#      in git by design).
+#   4. First deploy creates the schema (preDeployCommand) and seeds the
+#      airport catalog. See docs/M2-POSTGRES-RUNBOOK.md for the full
+#      sequence, the data-parity migration, and the rollback story.
+
+services:
+  # ---------------------------------------------------------------- API
+  - type: web
+    name: flyby-api-staging
+    runtime: node
+    plan: starter # free tier spin-down kills SSE; staging must stay warm
+    rootDir: packages/api
+    region: oregon # same region as the existing deploy PG instance
+    # NOTE: no per-service `branch:` - services deploy from whatever branch the
+    # Blueprint is imported from. Staging imports from `monorepo-candidate`;
+    # the M4 cutover re-imports (or merges) on the repo default branch.
+    # --include=dev: NODE_ENV=production would otherwise make npm skip
+    # devDependencies, which carry prisma/tsx/tsc needed by these commands.
+    buildCommand: npm install --include=dev && npx prisma generate --schema prisma/deploy/schema.postgres.prisma && npx tsc
+    # preDeployCommand runs after build, before start (migrations + seed gate).
+    # DATABASE_URL must point at the STAGING database, never prod (write-safety).
+    preDeployCommand: npx prisma migrate deploy --schema prisma/deploy/schema.postgres.prisma && npx tsx prisma/seed.ts
+    startCommand: node dist/server.js
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: DATABASE_URL
+        sync: false # staging PG connection string (dashboard)
+      - key: REDIS_URL
+        sync: false # staging Redis; SSE pub/sub depends on a real broker here
+      - key: ADMIN_API_KEY
+        generateValue: true # same pattern as the deploy service (c142ba7)
+      - key: NODE_ENV
+        value: production
+      # NOTE: MOCK_REDIS must NOT be set in any deployed environment.
+
+  # ---------------------------------------------------------------- Web
+  - type: web
+    name: flyby-web-staging
+    runtime: static
+    rootDir: packages/web
+    buildCommand: npm install --include=dev && npm run build
+    staticPublishPath: dist
+    pullRequestPreviewsEnabled: false
+    routes:
+      # SPA fallback: every non-file route serves index.html (React Router).
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    headers:
+      - path: /assets/*
+        name: Cache-Control
+        value: public, max-age=31536000, immutable
+      - path: /sw.js
+        name: Cache-Control
+        value: no-cache # service worker must revalidate every load
+      - path: /index.html
+        name: Cache-Control
+        value: no-cache
+    envVars:
+      # Points the PWA at the staging API (relative-path default is dev-only).
+      # M4 cutover changes this to the prod URL; rollback = revert this value.
+      - key: VITE_API_BASE_URL
+        sync: false # https://flyby-api-staging.onrender.com (dashboard)

@@ -1,0 +1,512 @@
+[
+  {
+    "code": "ATL",
+    "name": "Hartsfield-Jackson Atlanta International Airport",
+    "city": "Atlanta",
+    "state": "GA",
+    "country": "USA",
+    "timezone": "America/New_York",
+    "latitude": 33.6407,
+    "longitude": -84.4230
+  },
+  {
+    "code": "LAX",
+    "name": "Los Angeles International Airport",
+    "city": "Los Angeles",
+    "state": "CA",
+    "country": "USA",
+    "timezone": "America/Los_Angeles",
+    "latitude": 33.9415,
+    "longitude": -118.4083
+  },
+  {
+    "code": "ORD",
+    "name": "O'Hare International Airport",
+    "city": "Chicago",
+    "state": "IL",
+    "country": "USA",
+    "timezone": "America/Chicago",
+    "latitude": 41.9742,
+    "longitude": -87.9073
+  },
+  {
+    "code": "DFW",
+    "name": "Dallas/Fort Worth International Airport",
+    "city": "Dallas",
+    "state": "TX",
+    "country": "USA",
+    "timezone": "America/Chicago",
+    "latitude": 32.7757,
+    "longitude": -96.7955
+  },
+  {
+    "code": "DEN",
+    "name": "Denver International Airport",
+    "city": "Denver",
+    "state": "CO",
+    "country": "USA",
+    "timezone": "America/Denver",
+    "latitude": 39.8558,
+    "longitude": -104.6732
+  },
+  {
+    "code": "JFK",
+    "name": "John F. Kennedy International Airport",
+    "city": "New York",
+    "state": "NY",
+    "country": "USA",
+    "timezone": "America/New_York",
+    "latitude": 40.6413,
+    "longitude": -73.7781
+  },
+  {
+    "code": "SFO",
+    "name": "San Francisco International Airport",
+    "city": "San Francisco",
+    "state": "CA",
+    "country": "USA",
+    "timezone": "America/Los_Angeles",
+    "latitude": 37.6162,
+    "longitude": -122.3818
+  },
+  {
+    "code": "SEA",
+    "name": "Seattle-Tacoma International Airport",
+    "city": "Seattle",
+    "state": "WA",
+    "country": "USA",
+    "timezone": "America/Los_Angeles",
+    "latitude": 47.4502,
+    "longitude": -122.3088
+  },
+  {
+    "code": "LAS",
+    "name": "Harry Reid International Airport",
+    "city": "Las Vegas",
+    "state": "NV",
+    "country": "USA",
+    "timezone": "America/Los_Angeles",
+    "latitude": 36.0851,
+    "longitude": -115.1564
+  },
+  {
+    "code": "MCO",
+    "name": "Orlando International Airport",
+    "city": "Orlando",
+    "state": "FL",
+    "country": "USA",
+    "timezone": "America/New_York",
+    "latitude": 28.4282,
+    "longitude": -81.3083
+  },
+  {
+    "code": "CLT",
+    "name": "Charlotte Douglas International Airport",
+    "city": "Charlotte",
+    "state": "NC",
+    "country": "USA",
+    "timezone": "America/New_York",
+    "latitude": 35.2140,
+    "longitude": -80.9470
+  },
+  {
+    "code": "EWR",
+    "name": "Newark Liberty International Airport",
+    "city": "Newark",
+    "state": "NJ",
+    "country": "USA",
+    "timezone": "America/New_York",
+    "latitude": 40.6925,
+    "longitude": -74.1687
+  },
+  {
+    "code": "PHX",
+    "name": "Phoenix Sky Harbor International Airport",
+    "city": "Phoenix",
+    "state": "AZ",
+    "country": "USA",
+    "timezone": "America/Phoenix",
+    "latitude": 33.4350,
+    "longitude": -111.9750
+  },
+  {
+    "code": "MIA",
+    "name": "Miami International Airport",
+    "city": "Miami",
+    "state": "FL",
+    "country": "USA",
+    "timezone": "America/New_York",
+    "latitude": 25.7935,
+    "longitude": -80.2925
+  },
+  {
+    "code": "IAH",
+    "name": "George Bush Intercontinental Airport",
+    "city": "Houston",
+    "state": "TX",
+    "country": "USA",
+    "timezone": "America/Chicago",
+    "latitude": 29.9855,
+    "longitude": -95.3436
+  },
+  {
+    "code": "BOS",
+    "name": "Logan International Airport",
+    "city": "Boston",
+    "state": "MA",
+    "country": "USA",
+    "timezone": "America/New_York",
+    "latitude": 42.3735,
+    "longitude": -71.0175
+  },
+  {
+    "code": "MSP",
+    "name": "Minneapolis-Saint Paul International Airport",
+    "city": "Minneapolis",
+    "state": "MN",
+    "country": "USA",
+    "timezone": "America/Chicago",
+    "latitude": 44.8847,
+    "longitude": -93.2160
+  },
+  {
+    "code": "DTW",
+    "name": "Detroit Metropolitan Wayne County Airport",
+    "city": "Detroit",
+    "state": "MI",
+    "country": "USA",
+    "timezone": "America/Detroit",
+    "latitude": 42.2115,
+    "longitude": -83.3536
+  },
+  {
+    "code": "FLL",
+    "name": "Fort Lauderdale-Hollywood International Airport",
+    "city": "Fort Lauderdale",
+    "state": "FL",
+    "country": "USA",
+    "timezone": "America/New_York",
+    "latitude": 26.0732,
+    "longitude": -80.1531
+  },
+  {
+    "code": "PHL",
+    "name": "Philadelphia International Airport",
+    "city": "Philadelphia",
+    "state": "PA",
+    "country": "USA",
+    "timezone": "America/New_York",
+    "latitude": 39.8717,
+    "longitude": -75.2411
+  },
+  {
+    "code": "BWI",
+    "name": "Baltimore/Washington International Thurgood Marshall Airport",
+    "city": "Baltimore",
+    "state": "MD",
+    "country": "USA",
+    "timezone": "America/New_York",
+    "latitude": 39.1774,
+    "longitude": -76.6722
+  },
+  {
+    "code": "DCA",
+    "name": "Ronald Reagan Washington National Airport",
+    "city": "Arlington",
+    "state": "VA",
+    "country": "USA",
+    "timezone": "America/New_York",
+    "latitude": 38.8534,
+    "longitude": -77.0378
+  },
+  {
+    "code": "MDW",
+    "name": "Chicago Midway International Airport",
+    "city": "Chicago",
+    "state": "IL",
+    "country": "USA",
+    "timezone": "America/Chicago",
+    "latitude": 41.7872,
+    "longitude": -87.7469
+  },
+  {
+    "code": "TPA",
+    "name": "Tampa International Airport",
+    "city": "Tampa",
+    "state": "FL",
+    "country": "USA",
+    "timezone": "America/New_York",
+    "latitude": 27.9800,
+    "longitude": -82.5073
+  },
+  {
+    "code": "SAN",
+    "name": "San Diego International Airport",
+    "city": "San Diego",
+    "state": "CA",
+    "country": "USA",
+    "timezone": "America/Los_Angeles",
+    "latitude": 32.7333,
+    "longitude": -117.1891
+  },
+  {
+    "code": "SLC",
+    "name": "Salt Lake City International Airport",
+    "city": "Salt Lake City",
+    "state": "UT",
+    "country": "USA",
+    "timezone": "America/Denver",
+    "latitude": 40.7864,
+    "longitude": -111.9726
+  },
+  {
+    "code": "PDX",
+    "name": "Portland International Airport",
+    "city": "Portland",
+    "state": "OR",
+    "country": "USA",
+    "timezone": "America/Los_Angeles",
+    "latitude": 45.5885,
+    "longitude": -122.5975
+  },
+  {
+    "code": "STL",
+    "name": "St. Louis Lambert International Airport",
+    "city": "St. Louis",
+    "state": "MO",
+    "country": "USA",
+    "timezone": "America/Chicago",
+    "latitude": 38.7484,
+    "longitude": -90.3767
+  },
+  {
+    "code": "CVG",
+    "name": "Cincinnati/Northern Kentucky International Airport",
+    "city": "Cincinnati",
+    "state": "OH",
+    "country": "USA",
+    "timezone": "America/New_York",
+    "latitude": 39.0533,
+    "longitude": -84.6578
+  },
+  {
+    "code": "RDU",
+    "name": "Raleigh-Durham International Airport",
+    "city": "Raleigh",
+    "state": "NC",
+    "country": "USA",
+    "timezone": "America/New_York",
+    "latitude": 35.8775,
+    "longitude": -78.7883
+  },
+  {
+    "code": "IND",
+    "name": "Indianapolis International Airport",
+    "city": "Indianapolis",
+    "state": "IN",
+    "country": "USA",
+    "timezone": "America/Indiana/Indianapolis",
+    "latitude": 39.7167,
+    "longitude": -86.2817
+  },
+  {
+    "code": "AUS",
+    "name": "Austin-Bergstrom International Airport",
+    "city": "Austin",
+    "state": "TX",
+    "country": "USA",
+    "timezone": "America/Chicago",
+    "latitude": 30.1975,
+    "longitude": -97.6667
+  },
+  {
+    "code": "DAL",
+    "name": "Dallas Love Field",
+    "city": "Dallas",
+    "state": "TX",
+    "country": "USA",
+    "timezone": "America/Chicago",
+    "latitude": 32.8471,
+    "longitude": -96.8519
+  },
+  {
+    "code": "BNA",
+    "name": "Nashville International Airport",
+    "city": "Nashville",
+    "state": "TN",
+    "country": "USA",
+    "timezone": "America/Chicago",
+    "latitude": 36.1263,
+    "longitude": -86.6764
+  },
+  {
+    "code": "SMF",
+    "name": "Sacramento International Airport",
+    "city": "Sacramento",
+    "state": "CA",
+    "country": "USA",
+    "timezone": "America/Los_Angeles",
+    "latitude": 38.6905,
+    "longitude": -121.6067
+  },
+  {
+    "code": "MCI",
+    "name": "Kansas City International Airport",
+    "city": "Kansas City",
+    "state": "MO",
+    "country": "USA",
+    "timezone": "America/Chicago",
+    "latitude": 39.2968,
+    "longitude": -94.7179
+  },
+  {
+    "code": "HNL",
+    "name": "Daniel K. Inouye International Airport",
+    "city": "Honolulu",
+    "state": "HI",
+    "country": "USA",
+    "timezone": "Pacific/Honolulu",
+    "latitude": 21.3075,
+    "longitude": -157.9258
+  },
+  {
+    "code": "OAK",
+    "name": "San Francisco Bay Oakland International Airport",
+    "city": "Oakland",
+    "state": "CA",
+    "country": "USA",
+    "timezone": "America/Los_Angeles",
+    "latitude": 37.7213,
+    "longitude": -122.2207
+  },
+  {
+    "code": "MSY",
+    "name": "Louis Armstrong New Orleans International Airport",
+    "city": "New Orleans",
+    "state": "LA",
+    "country": "USA",
+    "timezone": "America/Chicago",
+    "latitude": 29.9933,
+    "longitude": -90.2591
+  },
+  {
+    "code": "CLE",
+    "name": "Cleveland Hopkins International Airport",
+    "city": "Cleveland",
+    "state": "OH",
+    "country": "USA",
+    "timezone": "America/New_York",
+    "latitude": 41.4115,
+    "longitude": -81.8329
+  },
+  {
+    "code": "PIT",
+    "name": "Pittsburgh International Airport",
+    "city": "Pittsburgh",
+    "state": "PA",
+    "country": "USA",
+    "timezone": "America/New_York",
+    "latitude": 40.4915,
+    "longitude": -80.2339
+  },
+  {
+    "code": "SJC",
+    "name": "San Jose International Airport",
+    "city": "San Jose",
+    "state": "CA",
+    "country": "USA",
+    "timezone": "America/Los_Angeles",
+    "latitude": 37.3639,
+    "longitude": -121.9292
+  },
+  {
+    "code": "SAT",
+    "name": "San Antonio International Airport",
+    "city": "San Antonio",
+    "state": "TX",
+    "country": "USA",
+    "timezone": "America/Chicago",
+    "latitude": 29.5326,
+    "longitude": -98.4720
+  },
+  {
+    "code": "RSW",
+    "name": "Southwest Florida International Airport",
+    "city": "Fort Myers",
+    "state": "FL",
+    "country": "USA",
+    "timezone": "America/New_York",
+    "latitude": 26.5361,
+    "longitude": -81.7533
+  },
+  {
+    "code": "IAD",
+    "name": "Washington Dulles International Airport",
+    "city": "Dulles",
+    "state": "VA",
+    "country": "USA",
+    "timezone": "America/New_York",
+    "latitude": 38.9531,
+    "longitude": -77.4495
+  },
+  {
+    "code": "SNA",
+    "name": "John Wayne Airport",
+    "city": "Santa Ana",
+    "state": "CA",
+    "country": "USA",
+    "timezone": "America/Los_Angeles",
+    "latitude": 33.6756,
+    "longitude": -117.8682
+  },
+  {
+    "code": "MKE",
+    "name": "General Mitchell International Airport",
+    "city": "Milwaukee",
+    "state": "WI",
+    "country": "USA",
+    "timezone": "America/Chicago",
+    "latitude": 43.0367,
+    "longitude": -87.9068
+  },
+  {
+    "code": "PBI",
+    "name": "Palm Beach International Airport",
+    "city": "West Palm Beach",
+    "state": "FL",
+    "country": "USA",
+    "timezone": "America/New_York",
+    "latitude": 26.6833,
+    "longitude": -80.0956
+  },
+  {
+    "code": "RIC",
+    "name": "Richmond International Airport",
+    "city": "Richmond",
+    "state": "VA",
+    "country": "USA",
+    "timezone": "America/New_York",
+    "latitude": 37.5058,
+    "longitude": -77.3183
+  },
+  {
+    "code": "BUF",
+    "name": "Buffalo Niagara International Airport",
+    "city": "Buffalo",
+    "state": "NY",
+    "country": "USA",
+    "timezone": "America/New_York",
+    "latitude": 42.9406,
+    "longitude": -78.7322
+  },
+  {
+    "code": "ONT",
+    "name": "Ontario International Airport",
+    "city": "Ontario",
+    "state": "CA",
+    "country": "USA",
+    "timezone": "America/Los_Angeles",
+    "latitude": 34.0559,
+    "longitude": -117.6111
+  }
+]

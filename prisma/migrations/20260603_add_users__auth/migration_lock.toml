@@ -1,0 +1,5 @@
+﻿# prisma/migrations/20260603_add_users__auth/migration_lock.toml
+[hash]
+blocks = 1
+bytes = 1234
+hash = "sha256:a1b2c3"

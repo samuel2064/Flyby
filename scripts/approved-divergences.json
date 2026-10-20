@@ -1,0 +1,17 @@
+{
+  "note": "Approved divergences for the monorepo-as-target migration (TIR-339). Each entry documents a path where the monorepo response shape legitimately differs from the deploy repo; QA consumed by contract-test suite on both sides before cutover (M3 gate).",
+  "patterns": [
+    {
+      "routePattern": "^/api/airports$",
+      "note": "Wrapper convention differs: monorepo returns { data: [...] } where deploy-era returned { airports: [...] }. The deployed WEB's search reads the shared data file (TIR-313) and never calls it without a query - QA probes retargeted."
+    },
+    {
+      "routePattern": "^/api/airports/[^/]+$",
+      "note": "Same wrapper convention: monorepo returns { data: { ...airport, checkpoints } } (richer) for /api/airports/:code; deploy returned the flat airport object. Developer-documented; QA retargets to contract, not to byte shape, for detail endpoints."
+    },
+    {
+      "routePattern": "^/api/wait-times$",
+      "note": "Monorepo's compat route added in M1; shape mirrored exactly from deploy. Wrapping differs from the native monorepo GET /api/wait-times didn't exist pre-M1."
+    }
+  ]
+}

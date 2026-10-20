@@ -1,0 +1,32 @@
+{
+  "name": "flyby",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Flyby — crowdsourced airport security checkpoint wait-time tracker",
+  "scripts": {
+    "dev": "concurrently \"npm run dev:api\" \"npm run dev:web\"",
+    "dev:api": "npm run dev --workspace=packages/api",
+    "dev:web": "npm run dev --workspace=packages/web",
+    "build": "npm run build --workspace=packages/api && npm run build --workspace=packages/web",
+    "test": "npm run test --workspace=packages/api && npm run test --workspace=packages/web && npm run test --workspace=packages/e2e",
+    "test:coverage": "npm run test:coverage --workspace=packages/api && npm run test:coverage --workspace=packages/web",
+    "test:e2e": "npm run e2e --workspace=packages/e2e",
+    "test:e2e:ui": "npm run e2e:ui --workspace=packages/e2e",
+    "lint": "npm run lint --workspace=packages/api --if-present && npm run lint --workspace=packages/web --if-present",
+    "db:generate": "cd packages/api && npx prisma generate",
+    "db:migrate": "cd packages/api && npx prisma migrate dev",
+    "db:seed": "cd packages/api && npx ts-node prisma/seed.ts"
+  },
+  "workspaces": [
+    "packages/*"
+  ],
+  "devDependencies": {
+    "@vitest/coverage-v8": "^4.1.11",
+    "concurrently": "^9.0.0",
+    "typescript": "^5.6.0",
+    "vitest": "^4.1.11"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
