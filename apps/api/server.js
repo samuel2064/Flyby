@@ -1,3 +1,5 @@
+// TIR-346 no-op redeploy marker: forces a fresh Render build of the API
+// service to rule out a wedged deploy during the 2026-10 outage triage.
 const express = require('express');
 const crypto = require('crypto');
 // Single source of truth for airport + checkpoint data, shared with apps/web
