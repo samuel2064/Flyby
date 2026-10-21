@@ -12,11 +12,11 @@ All automated tests are passing. The Flyby MVP has comprehensive test coverage f
 
 | Metric | Status |
 |--------|--------|
-| Backend Tests | 767/767 passing (100%) - 38 test files |
-| Frontend Tests | 377/377 passing (100%) - 30 test files |
+| Backend Tests | 800/800 passing (100%) - 40 test files |
+| Frontend Tests | 382/382 passing (100%) - 30 test files |
 | E2E Config Tests | 8/8 passing (Playwright port-override + render.yaml blueprint contract) |
 | E2E Tests | 20/20 passing (100%) Ã¢â‚¬â€ verified on override ports 3199/3299 |
-| **Total** | **1172/1172 passing (100%)** |
+| **Total** | **1207/1207 passing (100%)** |
 | Backend Coverage | 90.78% statements / 86.2% branches (threshold: 70%) |
 | Frontend Coverage | 90.41% statements / 84.18% branches (threshold: 70%) |
 | CI Pipeline | Configured (GitHub Actions) |

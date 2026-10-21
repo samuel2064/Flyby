@@ -606,3 +606,18 @@ describe("POST /api/reports — checkpointId from body when not in params", () =
     expect(res.body.data.checkpointId).toBe(cpId);
   });
 });
+describe("airport live stream - DB failure arm (coverage closeout)", () => {
+  it("returns 500 Failed to start stream when the airport lookup rejects", async () => {
+    const appPrisma = (await import("../src/prisma")).prisma;
+    const spy = vi.spyOn(appPrisma.airport, "findUnique").mockRejectedValueOnce(new Error("db down"));
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const res = await request(app).get("/api/checkpoints/airport/WST/live");
+      expect(res.status).toBe(500);
+      expect(res.body).toEqual({ error: "Failed to start stream" });
+      expect(spy).toHaveBeenCalled();
+    } finally {
+      consoleSpy.mockRestore();
+    }
+  });
+});

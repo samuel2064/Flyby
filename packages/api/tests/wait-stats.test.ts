@@ -10,6 +10,7 @@ import {
   TREND_WINDOW_MS,
 } from "../src/waitStats";
 import { invalidateWaitStatsCaches } from "../src/waitStatsRoutes";
+import { prisma as appPrisma } from "../src/prisma";
 
 const prisma = new PrismaClient();
 
@@ -275,5 +276,37 @@ describe("GET /api/wait-times/summary (route)", () => {
     const second = await request(app).get("/api/wait-times/summary");
     expect(second.status).toBe(200);
     expect(second.body.generatedAt).toBe(first.body.generatedAt);
+  });
+});
+
+describe("wait-stats routes - DB failure arms (coverage closeout)", () => {
+  beforeEach(() => {
+    invalidateWaitStatsCaches();
+  });
+
+  it("per-airport wait-stats returns 500 when the airport lookup fails", async () => {
+    const spy = vi.spyOn(appPrisma.airport, "findUnique").mockRejectedValueOnce(new Error("db down"));
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const res = await request(app).get("/api/airports/WST/wait-stats");
+      expect(res.status).toBe(500);
+      expect(res.body).toEqual({ error: "Database unavailable" });
+      expect(spy).toHaveBeenCalled();
+    } finally {
+      consoleSpy.mockRestore();
+    }
+  });
+
+  it("summary returns 500 when the airports query fails", async () => {
+    const spy = vi.spyOn(appPrisma.airport, "findMany").mockRejectedValueOnce(new Error("db down"));
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const res = await request(app).get("/api/wait-times/summary");
+      expect(res.status).toBe(500);
+      expect(res.body).toEqual({ error: "Database unavailable" });
+      expect(spy).toHaveBeenCalled();
+    } finally {
+      consoleSpy.mockRestore();
+    }
   });
 });
