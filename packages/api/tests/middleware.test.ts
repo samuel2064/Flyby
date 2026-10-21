@@ -573,3 +573,112 @@ describe("Custom error classes", () => {
     expect(err.message).toBe("Not found");
   });
 });
+
+describe("errorHandler - validation branches (coverage: ZodError / JsonParseError)", () => {
+  let req: Partial<Request>;
+  let res: any;
+  let next: any;
+  let consoleSpy: ReturnType<typeof vi.spyOn>;
+  const originalEnv = process.env.NODE_ENV;
+
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    next = vi.fn();
+    req = { method: "POST", path: "/api/validation-probe" };
+    res = {
+      status: vi.fn().mockReturnThis(),
+      json: vi.fn().mockReturnThis(),
+    };
+  });
+
+  afterEach(() => {
+    consoleSpy.mockRestore();
+    process.env.NODE_ENV = originalEnv;
+  });
+
+  it("maps a genuine ZodError to 400 VALIDATION_ERROR with the first issue detail", () => {
+    // A real ZodError (not a name-forged Error) so issues[] is populated
+    // exactly the way the production validation layer would produce it.
+    const { z } = require("zod") as typeof import("zod");
+    let zodError: unknown;
+    try {
+      z.object({ minutes: z.number().int().min(0) }).parse({ minutes: "not-a-number" });
+    } catch (e) {
+      zodError = e;
+    }
+    errorHandler(zodError as Error, req as Request, res as Response, next);
+
+    expect(res.status).toHaveBeenCalledWith(400);
+    const body = res.json.mock.calls[0][0];
+    expect(body.error.code).toBe("VALIDATION_ERROR");
+    expect(body.error.message).toContain("Validation error");
+    expect(body.error.message).toContain("minutes"); // first issue path detail
+    expect(body.error.path).toBe("/api/validation-probe");
+  });
+
+  it("maps JsonParseError to 400 PARSE_ERROR with the invalid-JSON message", () => {
+    const err = new Error("Unexpected token } in JSON");
+    err.name = "JsonParseError";
+    errorHandler(err, req as Request, res as Response, next);
+
+    expect(res.status).toHaveBeenCalledWith(400);
+    const body = res.json.mock.calls[0][0];
+    expect(body.error.code).toBe("PARSE_ERROR");
+    expect(body.error.message).toBe("Invalid JSON payload");
+    expect(body.error.path).toBe("/api/validation-probe");
+  });
+});
+
+describe("errorHandler - prisma error mapping arms (genuine PrismaClientKnownRequestError)", () => {
+  let req: Partial<Request>;
+  let res: any;
+  let next: any;
+  let consoleSpy: ReturnType<typeof vi.spyOn>;
+  const originalEnv = process.env.NODE_ENV;
+
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    next = vi.fn();
+    req = { method: "POST", path: "/api/prisma-probe" };
+    res = {
+      status: vi.fn().mockReturnThis(),
+      json: vi.fn().mockReturnThis(),
+    };
+  });
+
+  afterEach(() => {
+    consoleSpy.mockRestore();
+    process.env.NODE_ENV = originalEnv;
+  });
+
+  function prismaError(code: string): Error {
+    const { Prisma } = require("@prisma/client") as typeof import("@prisma/client");
+    return new Prisma.PrismaClientKnownRequestError("test", { code, clientVersion: "test" });
+  }
+
+  it("maps P2002 (unique violation) to 409 CONFLICT_ERROR", () => {
+    errorHandler(prismaError("P2002"), req as Request, res as Response, next);
+    expect(res.status).toHaveBeenCalledWith(409);
+    const body = res.json.mock.calls[0][0];
+    expect(body.error.code).toBe("CONFLICT_ERROR");
+    expect(body.error.message).toBe("Duplicate entry");
+  });
+
+  it("maps P2003 (foreign key violation) to 400 FOREIGN_KEY_ERROR", () => {
+    errorHandler(prismaError("P2003"), req as Request, res as Response, next);
+    expect(res.status).toHaveBeenCalledWith(400);
+    const body = res.json.mock.calls[0][0];
+    expect(body.error.code).toBe("FOREIGN_KEY_ERROR");
+    expect(body.error.message).toBe("Referenced record not found");
+  });
+
+  it("maps P2025 (record not found) to 400 DATABASE_ERROR", () => {
+    errorHandler(prismaError("P2025"), req as Request, res as Response, next);
+    expect(res.status).toHaveBeenCalledWith(400);
+    const body = res.json.mock.calls[0][0];
+    expect(body.error.code).toBe("DATABASE_ERROR");
+    expect(body.error.message).toBe("Database error");
+  });
+});

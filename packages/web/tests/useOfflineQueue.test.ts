@@ -219,3 +219,78 @@ describe("useOfflineQueue", () => {
     });
   });
 });
+describe("useOfflineQueue - background sync registration + failure arms", () => {
+  const originalServiceWorker = Object.getOwnPropertyDescriptor(Navigator.prototype, "serviceWorker")
+    ? undefined
+    : undefined;
+
+  function stubServiceWorker(ready: Promise<unknown>): void {
+    Object.defineProperty(navigator, "serviceWorker", {
+      value: { ready },
+      configurable: true,
+      writable: true,
+    });
+    (window as unknown as Record<string, unknown>).SyncManager = {};
+  }
+
+  afterEach(() => {
+    // @ts-expect-error test-only delete of the stubbed property
+    delete navigator.serviceWorker;
+    delete (window as unknown as Record<string, unknown>).SyncManager;
+    vi.restoreAllMocks();
+  });
+
+  it("registers background sync when a report is queued and the browser supports it", async () => {
+    const register = vi.fn().mockResolvedValue(undefined);
+    stubServiceWorker(Promise.resolve({ sync: { register } }));
+    vi.mocked(offlineQueueLib.getQueueCount).mockResolvedValue(1);
+    vi.mocked(offlineQueueLib.addReportToQueue).mockResolvedValue({ success: true, deduped: false });
+
+    const { result } = renderHook(() => useOfflineQueue());
+    await waitFor(() => expect(result.current.pendingCount).toBe(1));
+
+    let queued = false;
+    await act(async () => {
+      queued = await result.current.queueReport("ck-1", 12, "crowd");
+    });
+
+    expect(queued).toBe(true);
+    expect(register).toHaveBeenCalledWith("sync-reports");
+    expect(offlineQueueLib.addReportToQueue).toHaveBeenCalledWith(
+      expect.objectContaining({ checkpointId: "ck-1", minutes: 12, source: "crowd" }),
+    );
+  });
+
+  it("queues successfully even when background sync registration fails", async () => {
+    stubServiceWorker(Promise.reject(new Error("service worker unavailable")));
+    vi.mocked(offlineQueueLib.getQueueCount).mockResolvedValue(0);
+    vi.mocked(offlineQueueLib.addReportToQueue).mockResolvedValue({ success: true, deduped: false });
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const { result } = renderHook(() => useOfflineQueue());
+
+    let queued = false;
+    await act(async () => {
+      queued = await result.current.queueReport("ck-2", 25, "crowd");
+    });
+
+    expect(queued).toBe(true); // the report is queued; sync registration is best-effort
+    expect(warnSpy).toHaveBeenCalled();
+  });
+
+  it("returns false when queueing itself fails", async () => {
+    vi.mocked(offlineQueueLib.addReportToQueue).mockRejectedValue(new Error("storage full"));
+    vi.mocked(offlineQueueLib.getQueueCount).mockResolvedValue(0);
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const { result } = renderHook(() => useOfflineQueue());
+
+    let queued = true;
+    await act(async () => {
+      queued = await result.current.queueReport("ck-3", 30, "crowd");
+    });
+
+    expect(queued).toBe(false);
+    expect(errorSpy).toHaveBeenCalled();
+  });
+});

@@ -68,7 +68,7 @@ export default function Profile() {
                       {report.minutes} min
                     </span>
                     <p className="text-xs text-gray-500 mt-1">
-                      {new Date(report.createdAt).toLocaleDateString()}
+                      {new Date(report.createdAt).toISOString().slice(0, 10)}
                     </p>
                   </div>
                 </div>

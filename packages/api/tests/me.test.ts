@@ -145,3 +145,37 @@ describe("me module", () => {
     });
   });
 });
+
+describe("me module - error arms (direct invocation)", () => {
+  it("getMe returns 500 and increments the error metric when the request object is unusable", () => {
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const res = createFakeRes();
+    const poisonedReq = {
+      get headers() {
+        throw new Error("request destroyed");
+      },
+    } as unknown as Parameters<typeof getMe>[0];
+
+    getMe(poisonedReq, res);
+
+    expect(res.status).toHaveBeenCalledWith(500);
+    expect(res.status().json).toHaveBeenCalledWith({ error: "Internal server error" });
+    consoleSpy.mockRestore();
+  });
+
+  it("patchMe returns 500 when the request object is unusable", () => {
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const res = createFakeRes();
+    const poisonedReq = {
+      get headers() {
+        throw new Error("request destroyed");
+      },
+    } as unknown as Parameters<typeof patchMe>[0];
+
+    patchMe(poisonedReq, res);
+
+    expect(res.status).toHaveBeenCalledWith(500);
+    expect(res.status().json).toHaveBeenCalledWith({ error: "Internal server error" });
+    consoleSpy.mockRestore();
+  });
+});

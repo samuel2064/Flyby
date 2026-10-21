@@ -273,3 +273,91 @@ describe("compat moderation (admin-keyed)", () => {
     expect(res.body).toEqual({ error: "Invalid report id" });
   });
 });
+
+describe("compat moderation lifecycle (admin-keyed, full path)", () => {
+  const ADMIN_KEY = "dev-admin-key-local-only";
+  let wtFlagged = "";
+  let wtHidden = "";
+  let wtClean = "";
+
+  beforeAll(async () => {
+    const cp = await prisma.checkpoint.findFirst({ where: { airport: { code: QA_PREFIX } } });
+    const base = { checkpointId: cp!.id, source: "crowd", reportType: "standard" as const };
+    const flagged = await prisma.waitTime.create({ data: { ...base, minutes: 10, flagCount: 1, reportedAt: new Date("2026-10-19T10:00:00Z") } });
+    const hidden = await prisma.waitTime.create({ data: { ...base, minutes: 20, flagCount: 3, reportedAt: new Date("2026-10-19T11:00:00Z") } });
+    const clean = await prisma.waitTime.create({ data: { ...base, minutes: 5, flagCount: 0, reportedAt: new Date("2026-10-19T12:00:00Z") } });
+    wtFlagged = flagged.id;
+    wtHidden = hidden.id;
+    wtClean = clean.id;
+    await prisma.reportFlag.create({ data: { reportId: wtFlagged, reason: "inaccurate", note: "wrong line", sessionId: "mod-s-1", createdAt: new Date("2026-10-19T10:01:00Z") } });
+    for (const s of ["mod-s-2", "mod-s-3", "mod-s-4"]) {
+      await prisma.reportFlag.create({ data: { reportId: wtHidden, reason: "spam", sessionId: s, createdAt: new Date("2026-10-19T11:01:00Z") } });
+    }
+  });
+
+  afterAll(async () => {
+    await prisma.reportFlag.deleteMany({ where: { reportId: { in: [wtFlagged, wtHidden, wtClean] } } });
+    await prisma.waitTime.deleteMany({ where: { id: { in: [wtFlagged, wtHidden, wtClean] } } });
+  });
+
+  // The suite shares dev.db with parallel worker files - always filter queue
+  // responses down to this describe's fixture ids before asserting.
+  it("queue returns the deploy row shape with correct moderationStatus per partition", async () => {
+    const flaggedRes = await request(app).get("/api/moderation/reports?status=flagged").set("X-Admin-Key", ADMIN_KEY);
+    expect(flaggedRes.status).toBe(200);
+    const flaggedRow = flaggedRes.body.find((r: { id: string }) => r.id === wtFlagged);
+    expect(flaggedRow).toMatchObject({ airport: QA_PREFIX, checkpoint: "Main", waitMinutes: 10, flagCount: 1, moderationStatus: "flagged" });
+    expect(flaggedRow.flags).toHaveLength(1);
+    expect(flaggedRow.flags[0]).toMatchObject({ reason: "inaccurate", note: "wrong line" });
+    expect(typeof flaggedRow.flags[0].reportedAt).toBe("string");
+
+    const hiddenRes = await request(app).get("/api/moderation/reports?status=hidden").set("X-Admin-Key", ADMIN_KEY);
+    const hiddenRow = hiddenRes.body.find((r: { id: string }) => r.id === wtHidden);
+    expect(hiddenRow).toMatchObject({ waitMinutes: 20, flagCount: 3, moderationStatus: "hidden" });
+    expect(hiddenRow.flags).toHaveLength(3);
+
+    const noneRes = await request(app).get("/api/moderation/reports?status=none").set("X-Admin-Key", ADMIN_KEY);
+    const noneRow = noneRes.body.find((r: { id: string }) => r.id === wtClean);
+    expect(noneRow).toMatchObject({ waitMinutes: 5, flagCount: 0, moderationStatus: "none" });
+    expect(noneRow.flags).toHaveLength(0);
+  });
+
+  it("default queue serves the flagged partition only (hidden rows excluded)", async () => {
+    const res = await request(app).get("/api/moderation/reports").set("X-Admin-Key", ADMIN_KEY);
+    expect(res.status).toBe(200);
+    const mine = res.body.filter((r: { id: string }) => [wtFlagged, wtHidden, wtClean].includes(r.id));
+    expect(mine.map((r: { id: string }) => r.id)).toEqual([wtFlagged]);
+  });
+
+  it("queue 400s an unknown status filter", async () => {
+    const res = await request(app).get("/api/moderation/reports?status=bogus").set("X-Admin-Key", ADMIN_KEY);
+    expect(res.status).toBe(400);
+    expect(res.body.errors?.[0]?.field).toBe("status");
+  });
+
+  it("hide pushes flagCount to 3 and reports moderationStatus hidden", async () => {
+    const res = await request(app).post(`/api/moderation/reports/${wtFlagged}/hide`).set("X-Admin-Key", ADMIN_KEY);
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ id: wtFlagged, moderationStatus: "hidden", flagCount: 3, waitMinutes: 10 });
+
+    const stored = await prisma.waitTime.findUnique({ where: { id: wtFlagged } });
+    expect(stored?.flagCount).toBe(3);
+  });
+
+  it("clear removes all flags and reports moderationStatus none", async () => {
+    const res = await request(app).post(`/api/moderation/reports/${wtHidden}/clear`).set("X-Admin-Key", ADMIN_KEY);
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ id: wtHidden, moderationStatus: "none", flagCount: 0 });
+
+    const remainingFlags = await prisma.reportFlag.count({ where: { reportId: wtHidden } });
+    expect(remainingFlags).toBe(0);
+  });
+
+  it("404s a well-formed but unknown report id", async () => {
+    const res = await request(app)
+      .post("/api/moderation/reports/00000000-0000-4000-8000-000000000000/hide")
+      .set("X-Admin-Key", ADMIN_KEY);
+    expect(res.status).toBe(404);
+    expect(res.body).toEqual({ error: "Report not found" });
+  });
+});

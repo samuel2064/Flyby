@@ -175,3 +175,62 @@ describe("POST /v1/auth/login — error paths", () => {
     prisma.user.findUnique = originalFindUnique;
   });
 });
+
+describe("users.ts - remaining error arms (coverage closeout)", () => {
+  afterAll(async () => {
+    await prisma.$disconnect();
+  });
+
+  it("signup maps a raced P2002 (pre-check passed, create violated) to 409 Email already registered", async () => {
+    // The pre-check (findUnique -> 409 "User already exists") normally wins;
+    // this arm covers the race where the check passes but create() still hits
+    // the unique constraint. Mock at the prisma boundary to reach it.
+    const { Prisma } = await import("@prisma/client");
+    const findSpy = vi.spyOn(prisma.user, "findUnique").mockResolvedValueOnce(null);
+    const createSpy = vi
+      .spyOn(prisma.user, "create")
+      .mockRejectedValueOnce(
+        new Prisma.PrismaClientKnownRequestError("Unique constraint failed", {
+          code: "P2002",
+          clientVersion: "test",
+        }),
+      );
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const res = await request(app)
+        .post("/v1/auth/signup")
+        .send({ email: "race-arm@flyby.test", password: "pw123456", displayName: "Race" });
+      expect(res.status).toBe(409);
+      expect(res.body).toEqual({ error: "Email already registered" });
+      expect(findSpy).toHaveBeenCalled();
+      expect(createSpy).toHaveBeenCalled();
+    } finally {
+      consoleSpy.mockRestore();
+    }
+  });
+
+  it("me/reports rejects a malformed bearer token with 401", async () => {
+    const res = await request(app)
+      .get("/v1/auth/me/reports")
+      .set("Authorization", "Bearer not-a-real-jwt");
+    expect(res.status).toBe(401);
+    expect(res.body).toEqual({ error: "Unauthorized" });
+  });
+
+  it("me/reports returns 500 when the reports query fails", async () => {
+    const spy = vi.spyOn(prisma.waitTime, "findMany").mockRejectedValueOnce(new Error("db down"));
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const { signToken } = await import("../src/auth");
+      const token = signToken({ sub: "reports-arm-user" });
+      const res = await request(app)
+        .get("/v1/auth/me/reports")
+        .set("Authorization", `Bearer ${token}`);
+      expect(res.status).toBe(500);
+      expect(res.body).toEqual({ error: "Internal server error" });
+      expect(spy).toHaveBeenCalled();
+    } finally {
+      consoleSpy.mockRestore();
+    }
+  });
+});

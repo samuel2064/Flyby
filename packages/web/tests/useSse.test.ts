@@ -629,3 +629,103 @@ describe("useSse", () => {
     });
   });
 });
+
+describe("useSse - polling fallback + reconnect machinery (launch-critical degradation path)", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  function stubFetch(payload: unknown) {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => payload,
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+  it("engages polling fallback after retries are exhausted and delivers polled data", async () => {
+    const fetchMock = stubFetch({ data: { minutes: 33 } });
+    const { result } = renderHook(() =>
+      useSse<{ minutes: number }>("/stream", {
+        maxRetries: 1,
+        // Long enough that the scheduled backoff never fires in this test:
+        // with the mock's unconditional auto-open, a fresh connection resets
+        // retryCount, so exhaustion requires two errors on the SAME instance
+        // before the backoff creates a new one (mirrors prod, where a dead
+        // socket never opens and consecutive errors accumulate).
+        retryDelay: 5000,
+        pollUrl: "/api/poll",
+        pollInterval: 20,
+        throttleInterval: 0,
+      }),
+    );
+
+    await sleep(5); // initial instance auto-opens (status open, retry budget full)
+
+    act(() => {
+      MockEventSource.instances[0].onerror?.(new Event("error")); // 0 < 1 -> retry branch
+    });
+    act(() => {
+      MockEventSource.instances[0].onerror?.(new Event("error")); // 1 < 1 false -> exhausted
+    });
+
+    await waitFor(() => expect(result.current.isPolling).toBe(true));
+    expect(result.current.status).toBe("closed");
+
+    // The poll interval delivers the fetched payload through the poll path.
+    await waitFor(
+      () => {
+        expect(result.current.data).toEqual({ minutes: 33 });
+      },
+      { timeout: 2000 },
+    );
+    expect(fetchMock).toHaveBeenCalled();
+  });
+
+  it("schedules and executes the 30s reconnect while polling, then stops polling on reopen", async () => {
+    vi.useFakeTimers();
+    stubFetch({ data: { minutes: 5 } });
+    const { result } = renderHook(() =>
+      useSse<{ minutes: number }>("/stream", {
+        maxRetries: 0,
+        retryDelay: 1,
+        pollUrl: "/api/poll",
+        pollInterval: 10,
+        throttleInterval: 0,
+      }),
+    );
+
+    // Initial instance auto-opens, then a single error exhausts maxRetries=0
+    // and engages the polling fallback.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1);
+    });
+    expect(MockEventSource.instances.length).toBe(1);
+    act(() => {
+      MockEventSource.instances[0].onerror?.(new Event("error"));
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(result.current.isPolling).toBe(true);
+    expect(result.current.status).toBe("closed");
+
+    // Advance past the reconnect threshold (max(pollInterval, 30000)):
+    // tryReconnect fires and opens a fresh EventSource.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30000);
+    });
+    expect(MockEventSource.instances.length).toBe(2);
+
+    // The reconnected instance auto-opens -> stopPolling clears the interval.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1);
+    });
+    expect(result.current.status).toBe("open");
+    expect(result.current.isPolling).toBe(false);
+  });
+});

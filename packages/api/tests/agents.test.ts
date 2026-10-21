@@ -133,3 +133,36 @@ describe("agents module", () => {
     });
   });
 });
+describe("agents module - error arms (direct invocation)", () => {
+  it("getAgentsMe returns 500 when the request object is unusable", () => {
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const res = createFakeRes();
+    const poisonedReq = {
+      get headers() {
+        throw new Error("request destroyed");
+      },
+    } as unknown as Parameters<typeof getAgentsMe>[0];
+
+    getAgentsMe(poisonedReq, res);
+
+    expect(res.status).toHaveBeenCalledWith(500);
+    expect(res.status().json).toHaveBeenCalledWith({ error: "Internal server error" });
+    consoleSpy.mockRestore();
+  });
+
+  it("getInboxLite returns 500 when the request object is unusable", () => {
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const res = createFakeRes();
+    const poisonedReq = {
+      get headers() {
+        throw new Error("request destroyed");
+      },
+    } as unknown as Parameters<typeof getInboxLite>[0];
+
+    getInboxLite(poisonedReq, res);
+
+    expect(res.status).toHaveBeenCalledWith(500);
+    expect(res.status().json).toHaveBeenCalledWith({ error: "Internal server error" });
+    consoleSpy.mockRestore();
+  });
+});

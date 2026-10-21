@@ -8,6 +8,10 @@ export default defineConfig({
     fileParallelism: false,
     env: {
       MOCK_REDIS: "1",
+      // Dev-only admin key so the moderation compat suites run without a local
+      // packages/api/.env (CI checkouts have none). Not a secret: the same
+      // value is asserted literally inside tests/deploy-compat-qa.test.ts.
+      ADMIN_API_KEY: "dev-admin-key-local-only",
     },
     coverage: {
       provider: "v8",

@@ -1,115 +1,89 @@
 # Flyby Launch Checklist
 
-**Status:** ✅ READY TO LAUNCH  
-**Date:** 2026-07-18
+**Status:** AWAITING BOARD GATES (staging import / prod restore - see TIR-339)
+**Last reconciled:** 2026-10-21 (convergence era - supersedes the 2026-07-18 version)
+**Authoritative operational docs:** `docs/M2-POSTGRES-RUNBOOK.md` (deploy + data migration), `docs/STAGING-VERIFY.md` (staging checklist), `render.yaml` (service definitions)
 
-## Pre-Launch (DevOps)
+This checklist is the high-level launch sequence. Where a step needs detail,
+the linked doc is the source of truth - do not improvise commands here.
 
-### Infrastructure Setup
-- [ ] Provision PostgreSQL database (production)
-- [ ] Provision Redis instance
-- [ ] Configure domain DNS (flyby.app or custom)
-- [ ] Set up SSL certificates
-- [ ] Choose deployment platform:
-  - [ ] AWS (ECS/Elastic Beanstalk)
-  - [ ] GCP (Cloud Run/App Engine)
-  - [ ] Azure (App Service)
-  - [ ] Render/Railway (simpler alternative)
-  - [ ] Vercel + separate API host
+## Pre-Launch (board/DevOps)
 
-### Environment Configuration
-- [ ] Set `DATABASE_URL` (PostgreSQL connection)
-- [ ] Set `REDIS_URL` (Redis connection)
-- [ ] Set `NODE_ENV=production`
-- [ ] Configure GitHub Secrets for deploy credentials
-- [ ] Update CI/CD deploy jobs with real commands
+### Infrastructure
+- [ ] **Restore/upgrade `flyby-api` on Render** (prod API dark since Sep 26 -
+      free-tier suspension per TIR-346 triage). Track: TIR-345.
+- [ ] **Import the Render Blueprint** from this repo (staging pair:
+      `flyby-api-staging` + `flyby-web-staging` per `render.yaml`). Track: TIR-29.
+- [ ] Fill `sync: false` env vars on both staging services (staging PG URL,
+      staging Redis URL, web -> staging API base). `ADMIN_API_KEY` auto-generates.
+- [ ] Prod PG + Redis stay as-is until the cutover decision (M4).
 
-### Database Migration
-- [ ] Run: `npx prisma migrate deploy`
-- [ ] Run: `npx prisma db seed` (initial data)
-- [ ] Verify: 51 airports, 159 checkpoints loaded
+### Database (staging first)
+- [ ] First staging deploy auto-runs `prisma migrate deploy --schema prisma/deploy/schema.postgres.prisma` + seed (preDeployCommand)
+- [ ] Verify the automated checks pass (next section) - the seed gate query is in the runbook
+- [ ] **Data migration** (CEO condition 5 - no prod data loss): `npm run migrate:deploy-data` with `DEPLOY_DATABASE_URL` (prod, read-only usage) + `DATABASE_URL` (staging PG); review the JSON report + per-airport count parity. Full sequence: `docs/M2-POSTGRES-RUNBOOK.md`
 
 ## Launch Day
 
-### Deploy Staging First
+### Staging Verification (one command)
 ```bash
-# Trigger staging deploy via GitHub Actions
-# Or manually:
-npm ci
-npm run db:generate
-npm run build
-# Deploy packages/api/dist and packages/web/dist
+node scripts/staging-verify.mjs \
+  --api https://flyby-api-staging.onrender.com \
+  --web https://flyby-web-staging.onrender.com \
+  --report tmp/staging-verify-staging.json
 ```
+Covers: `/api/health` + services ok, `NODE_ENV=production`, 51-airport seed,
+`apt-` id shapes, checkpoint detail, `ck-`-slug resolution, vapid key,
+SSE connect frame, web index/PWA/`sw.js`. Exit 0 = contract-alive.
+Then the 32-probe corpus: `node scripts/contract-compare.mjs --candidate <staging-api> --no-prod`.
 
-### Staging Verification
-- [ ] Health check: `GET /health` → `{"ok":true}`
-- [ ] Airport search: `GET /api/airports?q=JFK` → returns results
-- [ ] Checkpoints: `GET /api/checkpoints` → returns list
-- [ ] SSE stream: `GET /api/checkpoints/stream` → connects
-- [ ] Frontend loads: Navigate to staging URL
-- [ ] PWA installs: Test "Add to Home Screen"
-- [ ] Offline mode: Disconnect network, submit report, reconnect → syncs
+### Manual staging spot-checks
+- [ ] Live Redis pub/sub: open `/api/events` in a browser tab, POST a report, watch the `wait-time-update` frame arrive within seconds
+- [ ] PWA installs ("Add to Home Screen") against the staging origin
+- [ ] Offline mode: disconnect, submit a report, reconnect -> queued report syncs
+- [ ] **Rollback rehearsal x2** (M4 precondition): roll the staging API back one deploy in the dashboard, re-run staging-verify, roll forward
 
-### Deploy Production
-- [ ] Merge to main branch (if not already)
-- [ ] Trigger production deploy via GitHub Actions
-- [ ] Wait for deployment to complete
+### QA gate
+- [ ] QA runs the retargeted probe set (retarget table on TIR-339)
+- [ ] QA sign-off recorded on TIR-339 - entry gate for M4
+
+### Production cutover (M4 - CEO go/no-go required)
+- [ ] M3 byte-compare vs prod green: `scripts/run-compare.ps1` (requires prod restored, TIR-345)
+- [ ] CEO go/no-go recorded on TIR-339
+- [ ] Flip: web `VITE_API_BASE_URL` -> monorepo API URL (blueprint env or dashboard)
+- [ ] Old flyby-api service stays warm through the window (rollback = flip the env var back)
+- [ ] Live smoke + 30-min watch window
 
 ### Production Verification
-- [ ] Health check passes
-- [ ] All API endpoints respond
-- [ ] Frontend loads and functions
-- [ ] Real-time updates work (SSE)
-- [ ] Push notifications functional (if enabled)
-- [ ] Monitoring/alerting active
+- [ ] `https://flyby-api.onrender.com/api/health` -> `{"status":"ok","services":{"database":"ok","redis":"ok"}}`
+- [ ] The 32-probe corpus against the NEW prod: `node scripts/contract-compare.mjs --candidate https://flyby-api.onrender.com --no-prod`
+- [ ] Real-time updates work (SSE), push notifications functional
+- [ ] Data parity: per-airport counts match the pre-cutover migration report
 
 ## Post-Launch
+- [ ] Day 1: error logs, API p95 latency, SSE connection success rate, DB performance
+- [ ] Week 1: DAU, feature usage, bug triage, iteration priorities
+- [ ] Ongoing: dependency updates, security audits, infra scaling
+- [ ] Decommission the old deploy repo's services once stable (final step of Option A)
 
-### Day 1 Monitoring
-- [ ] Check error logs (Sentry/CloudWatch)
-- [ ] Monitor API response times
-- [ ] Verify SSE connection success rate
-- [ ] Check database performance
-- [ ] Review user feedback (if any)
+## Success Metrics (first month)
+- Availability >99.9% uptime (Starter plan on the API - free tier spins down and kills SSE)
+- API p95 < 200ms
+- Wait-time accuracy: within 5 min on 80% of reports
+- Adoption: 100+ DAU
 
-### Week 1 Activities
-- [ ] Track daily active users
-- [ ] Analyze most-used features
-- [ ] Identify bugs or edge cases
-- [ ] Gather user feedback
-- [ ] Plan iteration priorities
+## Rollback Plan (convergence era)
 
-### Ongoing
-- [ ] Weekly dependency updates
-- [ ] Monthly security audits
-- [ ] Feature improvements based on data
-- [ ] Scale infrastructure as needed
-
-## Success Metrics
-
-**First Month Goals:**
-- ✅ Availability: >99.9% uptime
-- ✅ Performance: <200ms API response (p95)
-- ✅ Accuracy: Wait times within 5 min (80% of reports)
-- 🎯 Adoption: 100+ daily active users
-
-## Rollback Plan
-
-If issues arise:
-1. Revert to previous commit: `git revert <commit>`
-2. Redeploy via GitHub Actions
-3. Database: `npx prisma migrate resolve --rolled-back` if needed
-4. Notify users via status page
+1. **Public surface**: revert the web's `VITE_API_BASE_URL` to the old API URL -
+   the old service stays warm through the cutover window, so this is a config
+   flip, not a deploy.
+2. **Staging**: Render deploy history -> roll back one deploy (rehearsed twice pre-cutover).
+3. **Database**: the migration is additive into staging PG; prod PG is never
+   mutated before the flip. A post-flip data issue means flipping back, not
+   rolling back migrations.
+4. Escalation: post on TIR-339; CEO go/no-go governs retries.
 
 ## Support Contacts
-
-- **Engineering:** Founding Engineer
-- **Infrastructure:** DevOps Team
-- **Status Page:** To be configured
-
----
-
-**Launch Decision:** ✅ APPROVED  
-All tests passing, all features complete, documentation ready.
-
-**Ready to deploy.** 🚀
+- **Engineering:** Founding Engineer (TIR-339 owner)
+- **Infrastructure:** DevOps lane / board (Render dashboard access - TIR-29)
+- **Status Page:** to be configured
