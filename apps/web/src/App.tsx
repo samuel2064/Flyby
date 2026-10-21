@@ -128,7 +128,7 @@ function SearchReportView() {
                   <button
                     type="button"
                     onClick={refresh}
-                    className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center px-2 align-middle font-semibold text-brand-700 hover:underline focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+                    className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center py-3 px-4 align-middle font-semibold text-brand-700 hover:underline focus:outline-none focus:ring-2 focus:ring-brand-500/40"
                   >
                     Refresh
                   </button>
@@ -139,7 +139,7 @@ function SearchReportView() {
                 type="button"
                 data-testid="report-button"
                 onClick={() => setReportTarget(null)}
-                className="inline-flex min-h-[44px] items-center justify-center px-2 align-middle font-semibold text-brand-700 hover:underline focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+                className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center py-3 px-4 align-middle font-semibold text-brand-700 hover:underline focus:outline-none focus:ring-2 focus:ring-brand-500/40"
               >
                 Report a wait time
               </button>
