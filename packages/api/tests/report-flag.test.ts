@@ -7,6 +7,8 @@ import { FLAG_HIDE_THRESHOLD } from "../src/waitTimeUtils";
 
 const prisma = new PrismaClient();
 
+const ADMIN_KEY = "test-admin-key-0123456789abcdef";
+
 vi.mock("../src/redis", () => ({
   redisClient: { on: vi.fn(), ping: vi.fn().mockResolvedValue("PONG") },
   redisPub: { publish: vi.fn().mockResolvedValue(undefined) },
@@ -43,6 +45,8 @@ async function flag(reportId: string, session: string, reason = "inaccurate") {
 }
 
 beforeAll(async () => {
+  process.env.ADMIN_API_KEY = ADMIN_KEY;
+
   await prisma.waitTime.deleteMany();
   await prisma.checkpoint.deleteMany();
   await prisma.airport.deleteMany();
@@ -59,6 +63,7 @@ beforeEach(async () => {
 });
 
 afterAll(async () => {
+  delete process.env.ADMIN_API_KEY;
   await prisma.$disconnect();
 });
 
@@ -182,6 +187,34 @@ describe("POST /api/reports/:id/flag", () => {
 });
 
 describe("GET /api/reports/flagged", () => {
+  it("returns 401 when no admin key is provided", async () => {
+    await createReport(10);
+    const res = await request(app).get("/api/reports/flagged");
+    expect(res.status).toBe(401);
+    expect(res.body.error).toContain("admin key");
+  });
+
+  it("returns 401 when the admin key is wrong", async () => {
+    await createReport(10);
+    const res = await request(app)
+      .get("/api/reports/flagged")
+      .set("X-Admin-Key", "wrong-key");
+    expect(res.status).toBe(401);
+  });
+
+  it("returns 503 when ADMIN_API_KEY is not configured", async () => {
+    const savedKey = process.env.ADMIN_API_KEY;
+    delete process.env.ADMIN_API_KEY;
+    try {
+      await createReport(10);
+      const res = await request(app).get("/api/reports/flagged");
+      expect(res.status).toBe(503);
+      expect(res.body.error).toContain("ADMIN_API_KEY");
+    } finally {
+      process.env.ADMIN_API_KEY = savedKey;
+    }
+  });
+
   it("returns only flagged reports, worst first, with flag detail", async () => {
     const cleanId = await createReport(10);
     const onceId = await createReport(22);
@@ -192,7 +225,9 @@ describe("GET /api/reports/flagged", () => {
       await flag(thriceId, newSessionId(), i === 2 ? "spam" : "inaccurate");
     }
 
-    const res = await request(app).get("/api/reports/flagged");
+    const res = await request(app)
+      .get("/api/reports/flagged")
+      .set("X-Admin-Key", ADMIN_KEY);
     expect(res.status).toBe(200);
     const rows = res.body.data as Array<Record<string, unknown>>;
     const ids = rows.map((r) => r.id);
@@ -209,7 +244,9 @@ describe("GET /api/reports/flagged", () => {
 
   it("returns an empty list when nothing is flagged", async () => {
     await createReport(9);
-    const res = await request(app).get("/api/reports/flagged");
+    const res = await request(app)
+      .get("/api/reports/flagged")
+      .set("X-Admin-Key", ADMIN_KEY);
     expect(res.status).toBe(200);
     expect(res.body.data).toEqual([]);
   });

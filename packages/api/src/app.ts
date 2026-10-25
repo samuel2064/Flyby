@@ -28,6 +28,9 @@ import {
   postWaitTimeCompat,
   streamDeployEvents,
   compatListAirports,
+  compatGetAirportByCode,
+  compatListCheckpointsByAirport,
+  compatGetCheckpointHistory,
   compatSubscribe,
   compatListSubscriptions,
   compatListUserSubscriptions,
@@ -184,6 +187,12 @@ app.post("/api/wait-times/report", postWaitTimeCompat);
 app.get("/api/events", streamDeployEvents);
 app.get("/api/wait-times/stream", streamDeployEvents);
 app.get("/api/sse", streamDeployEvents);
+
+// Additional compat routes for catalog endpoints (mounted on /api/compat/ for
+// M0 testing; M1 will evaluate standard-path mounting strategy per CEO gate).
+app.get("/api/compat/airports/:code", compatGetAirportByCode);
+app.get("/api/compat/checkpoints", compatListCheckpointsByAirport);
+app.get("/api/compat/checkpoints/:id/history", compatGetCheckpointHistory);
 
 // Dashboard aggregation endpoints (TIR-336): cross-airport summary +
 // per-airport wait stats. Slug mirrors the deploy repo's contract so the

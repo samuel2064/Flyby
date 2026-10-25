@@ -341,6 +341,235 @@ export const compatListAirports = async (_req: Request, res: Response) => {
   }
 };
 
+// --- GET /api/airports/:code (deploy-compat flat shape) -----------------------
+// Deploy contract: {id:'apt-jfk',code,name,city,timezone} - no {data:} wrapper.
+// The native getAirportByCode returns {data: {...checkpoints...}}; this compat
+// route returns the flat airport object only, byte-compatible with prod.
+export const compatGetAirportByCode = async (req: Request, res: Response) => {
+  let code = req.params.code as string;
+
+  // apt-<code> resolution same as native
+  if (typeof code === "string" && /^apt-[a-z]{3}$/i.test(code)) {
+    code = code.slice(4).toUpperCase();
+  }
+
+  try {
+    const airport = await prisma.airport.findUnique({
+      where: { code: String(code).toUpperCase() },
+      select: { code: true, name: true, city: true, timezone: true },
+    });
+
+    if (!airport) {
+      res.status(404).json({ error: "Airport not found" });
+      return;
+    }
+
+    res.json({
+      id: `apt-${airport.code.toLowerCase()}`,
+      code: airport.code,
+      name: airport.name.replace(/ Airport$/, ""),
+      city: airport.city,
+      timezone: airport.timezone,
+    });
+  } catch (err) {
+    console.error("compatGetAirportByCode error:", err);
+    res.status(500).json({ error: "Database unavailable" });
+  }
+};
+
+// --- GET /api/checkpoints[?airport=] (deploy-compat flat pairs) ---------------
+// Deploy contract: {airport, code:[{airport,name}]} style flat pairs,
+// launch-5 have 'Main' FIRST. The native getCheckpointsByAirportCode returns
+// richer objects; this compat route returns the flat shape.
+export const compatListCheckpointsByAirport = async (req: Request, res: Response) => {
+  const raw = (req.query.airport ?? req.query.airportId) as string | undefined;
+  let code: string | null = null;
+  if (raw !== undefined) {
+    const trimmed = String(raw).trim();
+    code = trimmed.toLowerCase().startsWith("apt-") && /^apt-[a-z]{3}$/i.test(trimmed)
+      ? trimmed.slice(4).toUpperCase()
+      : trimmed.toUpperCase();
+  }
+
+  // Deploy-compat single-airport mode requires airport parameter
+  if (code) {
+    const airport = await prisma.airport.findUnique({
+      where: { code },
+      select: { code: true },
+    });
+    if (!airport) {
+      res.status(404).json({ error: "Airport not found" });
+      return;
+    }
+  } else if (raw === undefined) {
+    // No airport param provided - this is an error for deploy-compat single-airport mode
+    res.status(400).json({ error: "airport parameter required for deploy-compat mode" });
+    return;
+  }
+
+  try {
+    const where = code ? { airport: { code } } : {};
+    const checkpoints = await prisma.checkpoint.findMany({
+      where,
+      include: { airport: { select: { code: true } } },
+      orderBy: [
+        { name: "asc" }, // secondary
+      ],
+      take: 500,
+    });
+
+    // Sort: 'Main' checkpoint first (case-insensitive), then alphabetical
+    const sorted = checkpoints.sort((a, b) => {
+      const aIsMain = a.name.toLowerCase() === "main";
+      const bIsMain = b.name.toLowerCase() === "main";
+      if (aIsMain && !bIsMain) return -1;
+      if (!aIsMain && bIsMain) return 1;
+      return a.name.localeCompare(b.name);
+    });
+
+    if (code) {
+      // Single airport: {airport, code: [{airport, name}]}
+      res.json({
+        airport: code,
+        code: sorted.map((cp) => ({
+          airport: cp.airport.code,
+          name: cp.name,
+        })),
+      });
+    } else {
+      // All airports: group by airport code (not used in current tests but kept for completeness)
+      const grouped = new Map<string, Array<{ airport: string; name: string }>>();
+      for (const cp of sorted) {
+        const list = grouped.get(cp.airport.code) ?? [];
+        list.push({ airport: cp.airport.code, name: cp.name });
+        grouped.set(cp.airport.code, list);
+      }
+      res.json({
+        airports: Array.from(grouped.entries()).map(([airport, code]) => ({
+          airport,
+          code,
+        })),
+      });
+    }
+  } catch (err) {
+    console.error("compatListCheckpointsByAirport error:", err);
+    res.status(500).json({ error: "Database unavailable" });
+  }
+};
+
+// --- GET /api/checkpoints/:id/history (deploy-compat window/bucket params) ----
+// Deploy contract: ?window=4h&bucket=30m defaults, response shape:
+// {data:{history:[{time,minutes,count}],checkpointId,airportCode,airportName,name,windowHours,bucketMinutes,reportCount}}
+// Monorepo native: ?hours= (default 6), 15-min buckets, returns {data:[{bucket,minutes,count}]}
+export const compatGetCheckpointHistory = async (req: Request, res: Response) => {
+  let id = req.params.id as string;
+
+  // Deploy-compat (TIR-339): ck-<code>-<slug> ids resolve to the checkpoint UUID
+  const compatHistoryId = await resolveCompatCheckpointId(id);
+  if (compatHistoryId.kind === "missing") {
+    res.status(404).json({ error: "Checkpoint not found" });
+    return;
+  }
+  if (compatHistoryId.kind === "resolved") id = compatHistoryId.id;
+
+  const idValidation = (await import("./validation")).validateUUID(id);
+  if (!idValidation.valid) {
+    res.status(400).json({ error: idValidation.error });
+    return;
+  }
+
+  // Parse window parameter (e.g., "4h", "24h") - default 4h per deploy contract
+  const windowParam = (req.query.window as string) || "4h";
+  const windowMatch = windowParam.match(/^(\d+)h$/i);
+  if (!windowMatch) {
+    res.status(400).json({ error: "window must be in format like '4h', '24h'" });
+    return;
+  }
+  const windowHours = parseInt(windowMatch[1], 10);
+  if (windowHours < 1 || windowHours > 168) {
+    res.status(400).json({ error: "window hours must be between 1 and 168" });
+    return;
+  }
+
+  // Parse bucket parameter (e.g., "30m", "15m") - default 30m per deploy contract
+  const bucketParam = (req.query.bucket as string) || "30m";
+  const bucketMatch = bucketParam.match(/^(\d+)m$/i);
+  if (!bucketMatch) {
+    res.status(400).json({ error: "bucket must be in format like '30m', '15m'" });
+    return;
+  }
+  const bucketMinutes = parseInt(bucketMatch[1], 10);
+  if (bucketMinutes < 1 || bucketMinutes > 1440 || 60 % bucketMinutes !== 0) {
+    res.status(400).json({ error: "bucket minutes must divide 60 evenly (e.g., 5, 10, 15, 20, 30, 60)" });
+    return;
+  }
+
+  try {
+    const checkpoint = await prisma.checkpoint.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        code: true,
+        name: true,
+        terminal: true,
+        airport: { select: { code: true, name: true } },
+      },
+    });
+
+    if (!checkpoint) {
+      res.status(404).json({ error: "Checkpoint not found" });
+      return;
+    }
+
+    const since = new Date(Date.now() - windowHours * 60 * 60 * 1000);
+    const waitTimes = await prisma.waitTime.findMany({
+      where: {
+        checkpointId: id,
+        reportedAt: { gte: since },
+        ...VISIBLE_REPORT_WHERE,
+      },
+      orderBy: { reportedAt: "asc" },
+    });
+
+    const reportCount = waitTimes.length;
+
+    // Bucket into bucketMinutes intervals (use UTC for consistent bucketing)
+    const buckets = new Map<string, { minutes: number; count: number }>();
+    for (const wt of waitTimes) {
+      const date = new Date(wt.reportedAt);
+      date.setUTCMinutes(Math.floor(date.getUTCMinutes() / bucketMinutes) * bucketMinutes, 0, 0);
+      const key = date.toISOString();
+      const existing = buckets.get(key);
+      if (existing) {
+        existing.minutes = Math.round((existing.minutes * existing.count + wt.minutes) / (existing.count + 1));
+        existing.count += 1;
+      } else {
+        buckets.set(key, { minutes: wt.minutes, count: 1 });
+      }
+    }
+
+    const history = Array.from(buckets.entries())
+      .map(([time, { minutes, count }]) => ({ time, minutes, count }))
+      .sort((a, b) => a.time.localeCompare(b.time));
+
+    res.json({
+      data: {
+        history,
+        checkpointId: checkpoint.id,
+        airportCode: checkpoint.airport.code,
+        airportName: checkpoint.airport.name,
+        name: checkpoint.name,
+        windowHours,
+        bucketMinutes,
+        reportCount,
+      },
+    });
+  } catch (err) {
+    console.error("compatGetCheckpointHistory error:", err);
+    res.status(500).json({ error: "Database unavailable" });
+  }
+};
+
 // --- QA-surface aliases (compat / TIR-339 M1b) --------------------------------
 // The mock-era routes the QA regression battery was built against, re-homed
 // onto the monorepo's real storage. Redaction follows TIR-309's contract:

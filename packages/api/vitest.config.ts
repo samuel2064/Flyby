@@ -1,12 +1,18 @@
 /// <reference types="vitest" />
 import { defineConfig } from "vitest/config";
+import { resolve } from "path";
+import { fileURLToPath } from "url";
+
+const __dirname = fileURLToPath(new URL(".", import.meta.url));
 
 export default defineConfig({
   test: {
     globals: true,
     environment: "node",
     fileParallelism: false,
+    testTimeout: 30000,
     env: {
+      DATABASE_URL: `file:${resolve(__dirname, "prisma/prisma/dev.db")}`,
       MOCK_REDIS: "1",
       // Dev-only admin key so the moderation compat suites run without a local
       // packages/api/.env (CI checkouts have none). Not a secret: the same

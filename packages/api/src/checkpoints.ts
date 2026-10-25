@@ -51,38 +51,90 @@ interface CheckpointView {
 }
 
 // GET /api/checkpoints — list all checkpoints with latest wait time
-export const getCheckpoints = async (_req: Request, res: Response) => {
+// Supports BOTH native contract (no params, returns {data: CheckpointView[]})
+// AND deploy-compat contract (?airport=CODE, returns {airport, code: [{airport, name}]})
+export const getCheckpoints = async (req: Request, res: Response) => {
+  const airportQuery = req.query.airport as string | undefined;
+  const airportIdQuery = req.query.airportId as string | undefined;
+  const rawAirport = airportQuery ?? airportIdQuery;
+  const isDeployCompat = rawAirport !== undefined;
+
+  let airportCode: string | null = null;
+  if (isDeployCompat) {
+    const trimmed = String(rawAirport).trim();
+    airportCode = trimmed.toLowerCase().startsWith("apt-") && /^apt-[a-z]{3}$/i.test(trimmed)
+      ? trimmed.slice(4).toUpperCase()
+      : trimmed.toUpperCase();
+  }
+
   try {
+    // In deploy-compat mode, verify airport exists first (404 if not)
+    if (isDeployCompat && airportCode) {
+      const airport = await prisma.airport.findUnique({
+        where: { code: airportCode },
+        select: { code: true },
+      });
+      if (!airport) {
+        res.status(404).json({ error: "Airport not found" });
+        return;
+      }
+    }
+
+    const where = airportCode ? { airport: { code: airportCode } } : {};
     const checkpoints = await prisma.checkpoint.findMany({
+      where,
       include: {
         airport: { select: { code: true, name: true } },
         waitTimes: { where: VISIBLE_REPORT_WHERE, orderBy: { reportedAt: "desc" }, take: 50 },
       },
       orderBy: { name: "asc" },
-      take: 100,
+      take: isDeployCompat ? 500 : 100,
     });
 
-    const data: CheckpointView[] = checkpoints.map((cp) => {
-      const latest = cp.waitTimes[0];
-      const accuracy = computeAccuracy(cp.waitTimes);
-      const estimatedWaitTimeMinutes = computeConsensus(cp.waitTimes);
-      return {
-        id: cp.id,
-        airportCode: cp.airport.code,
-        airportName: cp.airport.name,
-        code: cp.code,
-        name: cp.name,
-        terminal: cp.terminal,
-        latestWaitTimeMinutes: latest?.minutes ?? null,
-        latestReportedAt: latest?.reportedAt?.toISOString() ?? null,
-        source: latest?.source ?? null,
-        reportType: latest?.reportType ?? null,
-        accuracy,
-        estimatedWaitTimeMinutes,
-      };
-    });
-
-    res.json({ data });
+    if (isDeployCompat) {
+      // Deploy-compat response shape: {airport, code: [{airport, name}]}
+      // Sort: 'Main' checkpoint first (case-insensitive), then alphabetical
+      const sorted = checkpoints.sort((a, b) => {
+        const aIsMain = a.name.toLowerCase() === "main";
+        const bIsMain = b.name.toLowerCase() === "main";
+        if (aIsMain && !bIsMain) return -1;
+        if (!aIsMain && bIsMain) return 1;
+        return a.name.localeCompare(b.name);
+      });
+      if (!airportCode) {
+        res.status(400).json({ error: "airport parameter required for deploy-compat mode" });
+        return;
+      }
+      res.json({
+        airport: airportCode,
+        code: sorted.map((cp) => ({
+          airport: cp.airport.code,
+          name: cp.name,
+        })),
+      });
+    } else {
+      // Native response shape: {data: CheckpointView[]} - alphabetical, limit 100
+      const data: CheckpointView[] = checkpoints.map((cp) => {
+        const latest = cp.waitTimes[0];
+        const accuracy = computeAccuracy(cp.waitTimes);
+        const estimatedWaitTimeMinutes = computeConsensus(cp.waitTimes);
+        return {
+          id: cp.id,
+          airportCode: cp.airport.code,
+          airportName: cp.airport.name,
+          code: cp.code,
+          name: cp.name,
+          terminal: cp.terminal,
+          latestWaitTimeMinutes: latest?.minutes ?? null,
+          latestReportedAt: latest?.reportedAt?.toISOString() ?? null,
+          source: latest?.source ?? null,
+          reportType: latest?.reportType ?? null,
+          accuracy,
+          estimatedWaitTimeMinutes,
+        };
+      });
+      res.json({ data });
+    }
   } catch (err) {
     console.error("getCheckpoints error:", err);
     errorTotal.labels("getCheckpoints").inc();
@@ -166,6 +218,8 @@ export const getCheckpointById = async (req: Request, res: Response) => {
 };
 
 // GET /api/checkpoints/:id/history — sparkline data
+// Supports BOTH native contract (?hours=, 15-min buckets, {data: [...]})
+// AND deploy-compat contract (?window=4h&bucket=30m, deploy response shape).
 export const getCheckpointHistory = async (req: Request, res: Response) => {
   let id = req.params.id as string;
 
@@ -184,27 +238,67 @@ export const getCheckpointHistory = async (req: Request, res: Response) => {
     return;
   }
 
-  const hoursInput = req.query.hours;
+  // Detect deploy-compat mode: presence of window/bucket params
+  const windowParam = req.query.window as string | undefined;
+  const bucketParam = req.query.bucket as string | undefined;
+  const isDeployCompat = windowParam !== undefined || bucketParam !== undefined;
+
   let hours: number;
-  if (hoursInput === undefined || hoursInput === null) {
-    hours = 6;
+  let bucketMinutes: number;
+
+  if (isDeployCompat) {
+    // Deploy contract: window=4h (default), bucket=30m (default)
+    const windowMatch = (windowParam || "4h").match(/^(\d+)h$/i);
+    if (!windowMatch) {
+      res.status(400).json({ error: "window must be in format like '4h', '24h'" });
+      return;
+    }
+    hours = parseInt(windowMatch[1], 10);
+    if (hours < 1 || hours > 168) {
+      res.status(400).json({ error: "window hours must be between 1 and 168" });
+      return;
+    }
+
+    const bucketMatch = (bucketParam || "30m").match(/^(\d+)m$/i);
+    if (!bucketMatch) {
+      res.status(400).json({ error: "bucket must be in format like '30m', '15m'" });
+      return;
+    }
+    bucketMinutes = parseInt(bucketMatch[1], 10);
+    if (bucketMinutes < 1 || bucketMinutes > 1440 || 60 % bucketMinutes !== 0) {
+      res.status(400).json({ error: "bucket minutes must divide 60 evenly (e.g., 5, 10, 15, 20, 30, 60)" });
+      return;
+    }
   } else {
-    // Reject non-numeric or non-string input early
-    if (typeof hoursInput !== 'string' || hoursInput.trim().length === 0) {
-      res.status(400).json({ error: "hours must be a positive integer between 1 and 24" });
-      return;
+    // Native contract: hours param (default 6), fixed 15-min buckets
+    const hoursInput = req.query.hours;
+    if (hoursInput === undefined || hoursInput === null) {
+      hours = 6;
+    } else {
+      if (typeof hoursInput !== 'string' || hoursInput.trim().length === 0) {
+        res.status(400).json({ error: "hours must be a positive integer between 1 and 24" });
+        return;
+      }
+      const parsed = Number(hoursInput);
+      if (!Number.isInteger(parsed) || parsed < 1 || parsed > 24) {
+        res.status(400).json({ error: "hours must be a positive integer between 1 and 24" });
+        return;
+      }
+      hours = parsed;
     }
-    const parsed = Number(hoursInput);
-    if (!Number.isInteger(parsed) || parsed < 1 || parsed > 24) {
-      res.status(400).json({ error: "hours must be a positive integer between 1 and 24" });
-      return;
-    }
-    hours = parsed;
+    bucketMinutes = 15;
   }
 
   try {
     const checkpoint = await prisma.checkpoint.findUnique({
       where: { id },
+      select: {
+        id: true,
+        code: true,
+        name: true,
+        terminal: true,
+        airport: { select: { code: true, name: true } },
+      },
     });
 
     if (!checkpoint) {
@@ -222,11 +316,13 @@ export const getCheckpointHistory = async (req: Request, res: Response) => {
       orderBy: { reportedAt: "asc" },
     });
 
-    // Bucket into 15-minute intervals
+    const reportCount = waitTimes.length;
+
+    // Bucket into bucketMinutes intervals (use UTC for consistent bucketing)
     const buckets = new Map<string, { minutes: number; count: number }>();
     for (const wt of waitTimes) {
       const date = new Date(wt.reportedAt);
-      date.setMinutes(Math.floor(date.getMinutes() / 15) * 15, 0, 0);
+      date.setUTCMinutes(Math.floor(date.getUTCMinutes() / bucketMinutes) * bucketMinutes, 0, 0);
       const key = date.toISOString();
       const existing = buckets.get(key);
       if (existing) {
@@ -237,13 +333,28 @@ export const getCheckpointHistory = async (req: Request, res: Response) => {
       }
     }
 
-    const data = Array.from(buckets.entries()).map(([bucket, { minutes, count }]) => ({
-      bucket,
-      minutes,
-      count,
-    }));
+    const history = Array.from(buckets.entries())
+      .map(([time, { minutes, count }]) => ({ time, minutes, count }))
+      .sort((a, b) => a.time.localeCompare(b.time));
 
-    res.json({ data });
+    if (isDeployCompat) {
+      // Deploy-compat response shape
+      res.json({
+        data: {
+          history,
+          checkpointId: checkpoint.id,
+          airportCode: checkpoint.airport.code,
+          airportName: checkpoint.airport.name,
+          name: checkpoint.name,
+          windowHours: hours,
+          bucketMinutes,
+          reportCount,
+        },
+      });
+    } else {
+      // Native response shape
+      res.json({ data: history });
+    }
   } catch (err) {
     console.error("getCheckpointHistory error:", err);
     errorTotal.labels("getCheckpointHistory").inc();

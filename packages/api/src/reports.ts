@@ -184,8 +184,22 @@ export const flagReport = async (req: Request, res: Response) => {
 
 // GET /api/reports/flagged — moderation queue: reports with at least one flag,
 // worst first, with the individual flags attached.
-// TODO(MVP #8): protect with admin auth once user accounts exist.
-export const getFlaggedReports = async (_req: Request, res: Response) => {
+// Protected with admin auth (X-Admin-Key or Authorization: Bearer <key>).
+export const getFlaggedReports = async (req: Request, res: Response) => {
+  const adminKey = configuredAdminKey();
+  if (!adminKey) {
+    res
+      .status(503)
+      .json({ error: "Moderation queue is disabled: ADMIN_API_KEY is not configured" });
+    return;
+  }
+
+  const providedKey = extractAdminKey(req);
+  if (!providedKey || !adminKeyMatches(providedKey, adminKey)) {
+    res.status(401).json({ error: "Invalid or missing admin key" });
+    return;
+  }
+
   try {
     const flagged = await prisma.waitTime.findMany({
       where: { flagCount: { gt: 0 } },

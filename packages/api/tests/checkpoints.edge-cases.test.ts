@@ -157,12 +157,12 @@ describe("GET /api/checkpoints/:id/history — bucket averaging edge cases", () 
   });
 
   it("averages multiple reports in same 15-minute bucket", async () => {
-    // Use timestamps guaranteed to fall in the same 15-minute bucket regardless of when test runs.
-    // Calculate the start of the current 15-minute bucket, then place reports within it.
-    const now = new Date();
-    const bucketStart = new Date(now);
-    bucketStart.setMinutes(Math.floor(now.getMinutes() / 15) * 15, 0, 0);
-    // Place reports at 2, 4, 6 minutes into the current bucket (well within it)
+    // Use timestamps guaranteed to fall in the same 15-minute bucket AND within the 1-hour window.
+    // Use a fixed reference time 30 minutes ago to avoid timing issues with the request.
+    const refTime = new Date(Date.now() - 30 * 60 * 1000); // 30 minutes ago
+    const bucketStart = new Date(refTime);
+    bucketStart.setUTCMinutes(Math.floor(refTime.getUTCMinutes() / 15) * 15, 0, 0);
+    // Place reports at 2, 4, 6 minutes into the bucket (well within it and within 1-hour window)
     const reportTimes = [
       new Date(bucketStart.getTime() + 2 * 60 * 1000),
       new Date(bucketStart.getTime() + 4 * 60 * 1000),
@@ -177,6 +177,8 @@ describe("GET /api/checkpoints/:id/history — bucket averaging edge cases", () 
     });
 
     const res = await request(app).get(`/api/checkpoints/${cpId}/history?hours=1`);
+    console.log("History response:", JSON.stringify(res.body, null, 2));
+    console.log("Status:", res.status);
     expect(res.status).toBe(200);
     expect(res.body.data.length).toBeGreaterThan(0);
     // Should have one bucket with averaged minutes: (10+20+30)/3 = 20

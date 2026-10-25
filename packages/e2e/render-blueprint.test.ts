@@ -45,9 +45,10 @@ describe("render.yaml staging blueprint (TIR-339 M2)", () => {
   });
 
   it("secrets follow the dashboard pattern, never baked into git", () => {
-    expect(blueprint).toMatch(/key: ADMIN_API_KEY\n\s+generateValue: true/);
+    // Match with flexible whitespace (handles CRLF and varying indentation)
+    expect(blueprint).toMatch(/-\s+key: ADMIN_API_KEY\s+generateValue: true/);
     for (const key of ["DATABASE_URL", "REDIS_URL", "VITE_API_BASE_URL"]) {
-      expect(blueprint).toMatch(new RegExp(`key: ${key}\\n\\s+sync: false`));
+      expect(blueprint).toMatch(new RegExp(`-\\s+key: ${key}\\s+sync: false`));
     }
   });
 
@@ -55,12 +56,13 @@ describe("render.yaml staging blueprint (TIR-339 M2)", () => {
     expect(blueprint).not.toMatch(/key:\s*MOCK_REDIS/);
   });
 
-  it("web service serves the built PWA with SPA fallback and worker no-cache", () => {
+it("web service serves the built PWA with SPA fallback and worker no-cache", () => {
     expect(blueprint).toContain("rootDir: packages/web");
     expect(blueprint).toContain("staticPublishPath: dist");
-    expect(blueprint).toMatch(/type: rewrite\n\s+source: \/\*\n\s+destination: \/index\.html/);
+    // Match the actual format with flexible whitespace (handles CRLF)
+    expect(blueprint).toMatch(/-\s+type: rewrite\s+source: \/\*\s+destination: \/index\.html/);
     // The service worker must revalidate every load or updates never land.
-    expect(blueprint).toMatch(/path: \/sw\.js\n\s+name: Cache-Control\n\s+value: no-cache/);
-    expect(blueprint).toMatch(/path: \/assets\/\*\n\s+name: Cache-Control\n\s+value: public, max-age=31536000, immutable/);
+    expect(blueprint).toMatch(/path: \/sw\.js\s+name: Cache-Control\s+value: no-cache/);
+    expect(blueprint).toMatch(/path: \/assets\/\*\s+name: Cache-Control\s+value: public, max-age=31536000, immutable/);
   });
 });

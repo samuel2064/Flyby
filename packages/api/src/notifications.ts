@@ -281,7 +281,7 @@ async function getPreference(userId: string | null) {
  */
 export function validatePreferenceFields(input: unknown): string[] {
   const errors: string[] = [];
-  if (!input || typeof input !== "object") {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
     errors.push("body must be an object");
     return errors;
   }

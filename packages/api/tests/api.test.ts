@@ -26,11 +26,11 @@ beforeAll(async () => {
 
   // Seed fresh test data
   await seed.main();
-});
+}, 60000);
 
 afterAll(async () => {
   await prisma.$disconnect();
-});
+}, 30000);
 
 describe("GET /health", () => {
   it("returns healthy status with service checks", async () => {

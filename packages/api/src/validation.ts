@@ -54,12 +54,12 @@ function validateReportType(value: string | undefined | null): { valid: true; ty
 }
 
 function validateSource(value: string | undefined | null): { valid: true; source: string } | { valid: false; error: string } {
-  const validSources = ["crowd", "official"];
+  const validSources = ["crowd", "official"] as const;
   if (typeof value !== "string") {
     return { valid: false, error: "source must be a string" };
   }
-  if (!validSources.includes(value)) {
-    return { valid: true, source: "crowd" };
+  if (!validSources.includes(value as typeof validSources[number])) {
+    return { valid: false, error: `Invalid source. Must be one of: ${validSources.join(", ")}` };
   }
   return { valid: true, source: value };
 }

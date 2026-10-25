@@ -322,7 +322,131 @@ describe("seed-style checkpoint names resolve through the compat surface (TIR-33
   });
 });
 
-describe("GET /api/events (deploy-compat SSE)", () => {
+  describe("GET /api/checkpoints?airport= (deploy-compat flat pairs)", () => {
+    it("returns flat pairs with Main checkpoint first when present", async () => {
+      const res = await request(app).get(`/api/checkpoints?airport=${COMP_CODE}`);
+      expect(res.status).toBe(200);
+      expect(res.body).toHaveProperty("airport", COMP_CODE);
+      expect(Array.isArray(res.body.code)).toBe(true);
+      expect(res.body.code.length).toBeGreaterThan(0);
+      // COMP_CODE has a "Main" checkpoint - should be first
+      expect(res.body.code[0]).toMatchObject({ airport: COMP_CODE, name: "Main" });
+      // All entries should have airport and name only
+      for (const entry of res.body.code) {
+        expect(entry).toHaveProperty("airport");
+        expect(entry).toHaveProperty("name");
+        expect(Object.keys(entry)).toHaveLength(2);
+      }
+    });
+
+    it("returns flat pairs sorted alphabetically when no Main checkpoint", async () => {
+      const res = await request(app).get(`/api/checkpoints?airport=${COMP_FULL}`);
+      expect(res.status).toBe(200);
+      expect(res.body).toHaveProperty("airport", COMP_FULL);
+      expect(Array.isArray(res.body.code)).toBe(true);
+      expect(res.body.code.length).toBeGreaterThan(0);
+      // COMP_FULL has "Terminal 4 Security" - no Main, so alphabetical
+      expect(res.body.code[0]).toMatchObject({ airport: COMP_FULL, name: "Terminal 4 Security" });
+    });
+
+    it("accepts apt- prefixed airportId", async () => {
+      const res = await request(app).get(`/api/checkpoints?airportId=apt-${COMP_CODE.toLowerCase()}`);
+      expect(res.status).toBe(200);
+      expect(res.body.airport).toBe(COMP_CODE);
+    });
+
+    it("404s unknown airport", async () => {
+      const res = await request(app).get("/api/checkpoints?airport=ZZZ");
+      expect(res.status).toBe(404);
+      expect(res.body).toEqual({ error: "Airport not found" });
+    });
+  });
+
+  describe("GET /api/checkpoints/:id/history (deploy-compat window/bucket params)", () => {
+    it("returns deploy-compat shape with window=4h&bucket=30m", async () => {
+      // Create some test reports
+      const now = new Date();
+      for (let i = 0; i < 5; i++) {
+        await prisma.waitTime.create({
+          data: {
+            checkpointId: fullCpId,
+            minutes: 10 + i * 2,
+            source: "crowd",
+            reportType: "standard",
+            reportedAt: new Date(now.getTime() - (4 - i) * 30 * 60 * 1000), // 30-min intervals
+          },
+        });
+      }
+
+      const res = await request(app).get(`/api/checkpoints/${fullCpId}/history?window=4h&bucket=30m`);
+      expect(res.status).toBe(200);
+      expect(res.body).toHaveProperty("data");
+      const data = res.body.data;
+      expect(data).toHaveProperty("history");
+      expect(data).toHaveProperty("checkpointId", fullCpId);
+      expect(data).toHaveProperty("airportCode", COMP_FULL);
+      expect(data).toHaveProperty("airportName");
+      expect(data).toHaveProperty("name", "Terminal 4 Security");
+      expect(data).toHaveProperty("windowHours", 4);
+      expect(data).toHaveProperty("bucketMinutes", 30);
+      expect(data).toHaveProperty("reportCount", 5);
+      expect(Array.isArray(data.history)).toBe(true);
+      // Each history entry has time, minutes, count
+      for (const entry of data.history) {
+        expect(entry).toHaveProperty("time");
+        expect(entry).toHaveProperty("minutes");
+        expect(entry).toHaveProperty("count");
+        expect(Object.keys(entry)).toHaveLength(3);
+      }
+    });
+
+    it("defaults to window=4h bucket=30m when params omitted", async () => {
+      const res = await request(app).get(`/api/checkpoints/${fullCpId}/history`);
+      expect(res.status).toBe(200);
+      // Without window/bucket params, should return NATIVE shape (not deploy-compat)
+      expect(res.body).toHaveProperty("data");
+      expect(Array.isArray(res.body.data)).toBe(true);
+      // Native shape has bucket/minutes/count directly
+      if (res.body.data.length > 0) {
+        expect(res.body.data[0]).toHaveProperty("bucket");
+        expect(res.body.data[0]).toHaveProperty("minutes");
+        expect(res.body.data[0]).toHaveProperty("count");
+      }
+    });
+
+    it("validates window format", async () => {
+      const res = await request(app).get(`/api/checkpoints/${fullCpId}/history?window=invalid`);
+      expect(res.status).toBe(400);
+      expect(res.body.error).toContain("window must be in format");
+    });
+
+    it("validates bucket format", async () => {
+      const res = await request(app).get(`/api/checkpoints/${fullCpId}/history?window=4h&bucket=invalid`);
+      expect(res.status).toBe(400);
+      expect(res.body.error).toContain("bucket must be in format");
+    });
+
+    it("validates bucket divides 60 evenly", async () => {
+      const res = await request(app).get(`/api/checkpoints/${fullCpId}/history?window=4h&bucket=7m`);
+      expect(res.status).toBe(400);
+      expect(res.body.error).toContain("divide 60 evenly");
+    });
+
+    it("works with ck-<code>-<slug> ids", async () => {
+      const res = await request(app).get(`/api/checkpoints/ck-${COMP_FULL.toLowerCase()}-terminal-4-security/history?window=2h&bucket=15m`);
+      expect(res.status).toBe(200);
+      expect(res.body.data).toHaveProperty("checkpointId", fullCpId);
+      expect(res.body.data.windowHours).toBe(2);
+      expect(res.body.data.bucketMinutes).toBe(15);
+    });
+
+    it("404s unresolvable ck- ids", async () => {
+      const res = await request(app).get("/api/checkpoints/ck-cmp-nothing-real-here/history?window=4h&bucket=30m");
+      expect(res.status).toBe(404);
+    });
+  });
+
+  describe("GET /api/events (deploy-compat SSE)", () => {
   it(
     "connects with a connected frame and stays silent until a real report lands",
     async () => {
@@ -431,4 +555,89 @@ describe("GET /api/events (deploy-compat SSE)", () => {
     },
     10000,
   );
+});
+
+describe("GET /api/compat/airports/:code (deploy-compat flat airport)", () => {
+  it("returns flat airport object without {data:} wrapper", async () => {
+    const res = await request(app).get(`/api/compat/airports/${COMP_CODE}`);
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveProperty("id", `apt-${COMP_CODE.toLowerCase()}`);
+    expect(res.body).toHaveProperty("code", COMP_CODE);
+    expect(res.body).toHaveProperty("name");
+    expect(res.body).toHaveProperty("city");
+    expect(res.body).toHaveProperty("timezone");
+    // No checkpoints, no {data:} wrapper
+    expect(res.body).not.toHaveProperty("checkpoints");
+    expect(res.body).not.toHaveProperty("data");
+  });
+
+  it("accepts apt-<code> prefix", async () => {
+    const res = await request(app).get(`/api/compat/airports/apt-${COMP_CODE.toLowerCase()}`);
+    expect(res.status).toBe(200);
+    expect(res.body.code).toBe(COMP_CODE);
+  });
+
+  it("404s unknown airport", async () => {
+    const res = await request(app).get("/api/compat/airports/ZZZ");
+    expect(res.status).toBe(404);
+    expect(res.body).toEqual({ error: "Airport not found" });
+  });
+
+  it("strips ' Airport' suffix from name if present", async () => {
+    // The seed data doesn't have ' Airport' suffix, but the compat route handles it
+    const res = await request(app).get(`/api/compat/airports/${COMP_CODE}`);
+    expect(res.status).toBe(200);
+    expect(res.body.name).not.toMatch(/ Airport$/);
+  });
+});
+
+describe("GET /api/compat/checkpoints (deploy-compat flat pairs)", () => {
+  it("returns flat pairs with airport parameter", async () => {
+    const res = await request(app).get(`/api/compat/checkpoints?airport=${COMP_CODE}`);
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveProperty("airport", COMP_CODE);
+    expect(Array.isArray(res.body.code)).toBe(true);
+    expect(res.body.code.length).toBeGreaterThan(0);
+    expect(res.body.code[0]).toMatchObject({ airport: COMP_CODE, name: "Main" });
+  });
+
+  it("404s unknown airport", async () => {
+    const res = await request(app).get("/api/compat/checkpoints?airport=ZZZ");
+    expect(res.status).toBe(404);
+    expect(res.body).toEqual({ error: "Airport not found" });
+  });
+
+  it("400s when airport param missing", async () => {
+    const res = await request(app).get("/api/compat/checkpoints");
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain("airport parameter required");
+  });
+});
+
+describe("GET /api/compat/checkpoints/:id/history (deploy-compat window/bucket)", () => {
+  it("returns deploy-compat shape with window/bucket params", async () => {
+    const res = await request(app).get(`/api/compat/checkpoints/${fullCpId}/history?window=4h&bucket=30m`);
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveProperty("data");
+    const data = res.body.data;
+    expect(data).toHaveProperty("history");
+    expect(data).toHaveProperty("checkpointId", fullCpId);
+    expect(data).toHaveProperty("airportCode", COMP_FULL);
+    expect(data).toHaveProperty("windowHours", 4);
+    expect(data).toHaveProperty("bucketMinutes", 30);
+    expect(data).toHaveProperty("reportCount");
+  });
+
+  it("works with ck-<code>-<slug> ids", async () => {
+    const res = await request(app).get(`/api/compat/checkpoints/ck-${COMP_FULL.toLowerCase()}-terminal-4-security/history?window=2h&bucket=15m`);
+    expect(res.status).toBe(200);
+    expect(res.body.data).toHaveProperty("checkpointId", fullCpId);
+    expect(res.body.data.windowHours).toBe(2);
+    expect(res.body.data.bucketMinutes).toBe(15);
+  });
+
+  it("404s unresolvable ck- ids", async () => {
+    const res = await request(app).get("/api/compat/checkpoints/ck-cmp-nothing-real-here/history?window=4h&bucket=30m");
+    expect(res.status).toBe(404);
+  });
 });

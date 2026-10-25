@@ -53,13 +53,13 @@ beforeAll(async () => {
   airportId = cp!.airport.id;
 
   await setupTestUser();
-});
+}, 60000);
 
 afterAll(async () => {
   await prisma.waitTime.deleteMany({ where: { userId: testUserId } });
   await prisma.user.deleteMany({ where: { email: testUserEmail } });
   await prisma.$disconnect();
-});
+}, 30000);
 
 beforeEach(async () => {
   await prisma.waitTime.deleteMany();

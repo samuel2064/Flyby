@@ -249,9 +249,15 @@ describe("validateSource", () => {
     expect(result.source).toBe("official");
   });
 
-  it("defaults invalid source to crowd", () => {
+  it("rejects invalid source", () => {
     const result = validateSource("invalid");
-    expect(result.valid).toBe(true);
-    expect(result.source).toBe("crowd");
+    expect(result.valid).toBe(false);
+    expect(result.error).toContain("Must be one of");
+  });
+
+  it("rejects non-string", () => {
+    const result = validateSource(123 as unknown);
+    expect(result.valid).toBe(false);
+    expect(result.error).toBe("source must be a string");
   });
 });

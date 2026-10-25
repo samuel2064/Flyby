@@ -15,6 +15,13 @@ coverage/
 /tmp/
 *.backup
 packages/*/tmp_*.txt
+# Root-level heartbeat scratch dumps
+/checkout*.json
+/comment*.json
+/comment*.txt
+/heartbeat_comment.json
+/status_update.json
+/migration_plan.json
 
 # Legacy standalone web directory (moved to packages/web)
 /web/
