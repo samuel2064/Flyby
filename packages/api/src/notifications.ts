@@ -1,4 +1,4 @@
-import { Request, Response } from "express";
+import { Request, Response, NextFunction } from "express";
 import { prisma } from "./prisma";
 import { decodeToken } from "./auth";
 import { VISIBLE_REPORT_WHERE } from "./waitTimeUtils";
@@ -316,7 +316,7 @@ export function validatePreferenceFields(input: unknown): string[] {
  * Resolve the user id from a Bearer token; respond 401 if missing/invalid.
  * Returns null when no authenticated user could be established.
  */
-function requireAuth(req: Request, res: Response): string | null {
+function resolveUserId(req: Request, res: Response): string | null {
   const token = req.headers.authorization?.replace("Bearer ", "") ?? null;
   if (!token) {
     res.status(401).json({ error: "Authentication required" });
@@ -332,6 +332,19 @@ function requireAuth(req: Request, res: Response): string | null {
 }
 
 /**
+ * Express middleware auth guard (TIR-359). Rejects the request with 401 unless a
+ * valid Bearer token resolves to a user id, and exposes it to downstream
+ * handlers as `res.locals.userId`. Mount ahead of routes that must be
+ * authenticated (e.g. endpoint-scoped unsubscribe).
+ */
+export function requireAuth(req: Request, res: Response, next: NextFunction): void {
+  const userId = resolveUserId(req, res);
+  if (!userId) return;
+  res.locals.userId = userId;
+  next();
+}
+
+/**
  * GET /api/notifications/preferences
  *
  * Returns the authenticated user's notification preferences. Auto-creates a
@@ -342,7 +355,7 @@ function requireAuth(req: Request, res: Response): string | null {
  *   401 Not authenticated
  */
 export async function getPreferences(req: Request, res: Response) {
-  const userId = requireAuth(req, res);
+  const userId = resolveUserId(req, res);
   if (!userId) return;
 
   const pref = await getPreference(userId);
@@ -374,7 +387,7 @@ export async function getPreferences(req: Request, res: Response) {
  *   401 Not authenticated
  */
 export async function updatePreferences(req: Request, res: Response) {
-  const userId = requireAuth(req, res);
+  const userId = resolveUserId(req, res);
   if (!userId) return;
 
   const errors = validatePreferenceFields(req.body);
@@ -433,41 +446,91 @@ export async function getVapidPublicKey(_req: Request, res: Response) {
 }
 
 export async function subscribe(req: Request, res: Response) {
-  const { endpoint, keys, airportId } = req.body;
+  const body = (req.body && typeof req.body === "object" && !Array.isArray(req.body) ? req.body : {}) as Record<string, unknown>;
+  const { endpoint, keys, airportId } = body as { endpoint?: unknown; keys?: unknown; airportId?: unknown };
 
-  if (!endpoint || !keys || !airportId) {
+  if (typeof endpoint !== "string" || endpoint.trim() === "" || typeof airportId !== "string" || airportId.trim() === "") {
     res.status(400).json({ error: "Missing required fields: endpoint, keys, airportId" });
     return;
   }
 
-  if (!keys.p256dh || !keys.auth) {
+  if (!keys || typeof keys !== "object" || Array.isArray(keys)) {
+    res.status(400).json({ error: "keys must include p256dh and auth" });
+    return;
+  }
+  const keyObj = keys as Record<string, unknown>;
+  if (typeof keyObj.p256dh !== "string" || keyObj.p256dh === "" || typeof keyObj.auth !== "string" || keyObj.auth === "") {
     res.status(400).json({ error: "keys must include p256dh and auth" });
     return;
   }
 
-  const airport = await prisma.airport.findUnique({ where: { id: airportId } });
-  if (!airport) {
-    res.status(404).json({ error: "Airport not found" });
-    return;
-  }
-
+  // TIR-359 auth guard: the subscription owner is ALWAYS derived from the
+  // verified Bearer token — a client-supplied `userId` in the body is ignored
+  // (previously a caller could bind a subscription to an arbitrary user). A
+  // malformed/expired token is rejected instead of being silently downgraded to
+  // anonymous. Anonymous PWA subscribers (no Authorization header) stay
+  // supported, matching the deploy surface.
   const token = req.headers.authorization?.replace("Bearer ", "") ?? null;
   let userId: string | null = null;
   if (token) {
     const dec = decodeToken(token);
     userId = typeof dec?.sub === "string" ? dec.sub : null;
+    if (!userId) {
+      res.status(401).json({ error: "Invalid token" });
+      return;
+    }
   }
 
-  const subscription = await prisma.notificationSubscription.create({
-    data: {
-      endpoint,
-      keys: JSON.stringify(keys),
-      airportId,
-      userId: userId ?? undefined,
-    },
-  });
+  try {
+    // TIR-358: validate the airport exists BEFORE create so a bogus `airportId`
+    // returns 404 instead of surfacing a Prisma FK violation (P2003) that, as an
+    // unhandled rejection on Node 15+, could terminate the API process.
+    const airport = await prisma.airport.findUnique({ where: { id: airportId } });
+    if (!airport) {
+      res.status(404).json({ error: "Airport not found" });
+      return;
+    }
 
-  res.status(201).json({ data: { id: subscription.id, airportId, createdAt: subscription.createdAt } });
+    // TIR-359: subscription creation must be idempotent. A device that re-enables
+    // alerts (or a client that retries the POST) reuses the same `endpoint`, and
+    // previously each POST inserted a brand-new row — so `dispatchWaitTimeAlerts`
+    // sent the same push N times per report. Match the deploy-compat contract
+    // (`compatSubscribe`): find the existing (endpoint, airportId) row, refresh
+    // its keys/user, and only `create` when none exists. 201 on create, 200 on
+    // idempotent re-subscribe.
+    const existing = await prisma.notificationSubscription.findFirst({
+      where: { endpoint, airportId },
+      orderBy: { createdAt: "asc" },
+    });
+
+    if (existing) {
+      const updated = await prisma.notificationSubscription.update({
+        where: { id: existing.id },
+        data: {
+          keys: JSON.stringify(keyObj),
+          userId: userId ?? existing.userId,
+        },
+      });
+      res.status(200).json({ data: { id: updated.id, airportId, createdAt: updated.createdAt } });
+      return;
+    }
+
+    const subscription = await prisma.notificationSubscription.create({
+      data: {
+        endpoint,
+        keys: JSON.stringify(keyObj),
+        airportId,
+        userId: userId ?? undefined,
+      },
+    });
+
+    res.status(201).json({ data: { id: subscription.id, airportId, createdAt: subscription.createdAt } });
+  } catch (err) {
+    // TIR-358: never let a DB error escape as an unhandled rejection — report a
+    // 500 and keep the process (and every other route) serving.
+    console.error("subscribe error:", err);
+    res.status(500).json({ error: "Failed to save subscription" });
+  }
 }
 
 export async function unsubscribe(req: Request, res: Response) {
@@ -495,6 +558,80 @@ export async function unsubscribe(req: Request, res: Response) {
 
   await prisma.notificationSubscription.delete({ where: { id } });
   res.json({ data: { id } });
+}
+
+/**
+ * DELETE /api/notifications/subscribe  (TIR-359)
+ *
+ * Endpoint-scoped unsubscribe. The browser push endpoint (a capability the
+ * client already holds) plus an optional `airportId` identifies the row(s) to
+ * remove. The route is mounted behind `requireAuth`, so the caller must present
+ * a valid token, and a caller can never remove a subscription owned by another
+ * user.
+ *
+ * Body/query: { endpoint: string, airportId?: string }
+ * Response:
+ *   200 { data: { endpoint, deleted } }
+ *   400 missing endpoint
+ *   401 not authenticated (auth middleware)
+ *   403 endpoint owned by another user
+ *   404 no matching subscription
+ */
+export async function unsubscribeByEndpoint(req: Request, res: Response) {
+  const body = (req.body && typeof req.body === "object" && !Array.isArray(req.body) ? req.body : {}) as Record<string, unknown>;
+  const endpoint =
+    typeof body.endpoint === "string" && body.endpoint !== ""
+      ? body.endpoint
+      : typeof req.query.endpoint === "string" && req.query.endpoint !== ""
+        ? req.query.endpoint
+        : "";
+  const airportId =
+    typeof body.airportId === "string" && body.airportId !== ""
+      ? body.airportId
+      : typeof req.query.airportId === "string" && req.query.airportId !== ""
+        ? req.query.airportId
+        : undefined;
+
+  if (!endpoint) {
+    res.status(400).json({ error: "Missing required field: endpoint" });
+    return;
+  }
+
+  // Mounted behind requireAuth, but resolve defensively so the handler is also
+  // safe to call directly.
+  const userId =
+    typeof res.locals.userId === "string"
+      ? (res.locals.userId as string)
+      : (() => {
+          const token = req.headers.authorization?.replace("Bearer ", "") ?? null;
+          if (!token) return null;
+          const dec = decodeToken(token);
+          return typeof dec?.sub === "string" ? dec.sub : null;
+        })();
+  if (!userId) {
+    res.status(401).json({ error: "Authentication required" });
+    return;
+  }
+
+  try {
+    const rows = await prisma.notificationSubscription.findMany({
+      where: airportId ? { endpoint, airportId } : { endpoint },
+    });
+    if (rows.length === 0) {
+      res.status(404).json({ error: "Subscription not found" });
+      return;
+    }
+    // A row bound to a different user cannot be removed by this caller.
+    if (rows.some((r) => r.userId && r.userId !== userId)) {
+      res.status(403).json({ error: "Forbidden" });
+      return;
+    }
+    await prisma.notificationSubscription.deleteMany({ where: { id: { in: rows.map((r) => r.id) } } });
+    res.json({ data: { endpoint, deleted: rows.length } });
+  } catch (err) {
+    console.error("unsubscribeByEndpoint error:", err);
+    res.status(500).json({ error: "Failed to remove subscription" });
+  }
 }
 
 export async function getSubscriptions(req: Request, res: Response) {

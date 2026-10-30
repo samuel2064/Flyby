@@ -44,7 +44,7 @@ import {
   compatModerationHide,
   compatModerationClear,
 } from "./deployCompat";
-import { getVapidPublicKey, subscribe, unsubscribe, getSubscriptions, sendNotifications, getPreferences, updatePreferences } from "./notifications";
+import { getVapidPublicKey, subscribe, unsubscribe, unsubscribeByEndpoint, getSubscriptions, sendNotifications, getPreferences, updatePreferences, requireAuth } from "./notifications";
 import usersRouter from "./usersRouter";
 import { getAgentsMe, getInboxLite } from "./agents";
 
@@ -216,6 +216,8 @@ app.use("/v1/auth", usersRouter);
 // Push notifications
 app.get("/api/notifications/vapid-public-key", getVapidPublicKey);
 app.post("/api/notifications/subscribe", subscribe);
+// TIR-359: endpoint-scoped unsubscribe (authenticated) alongside delete-by-id.
+app.delete("/api/notifications/subscribe", requireAuth, unsubscribeByEndpoint);
 app.delete("/api/notifications/subscriptions/:id", unsubscribe);
 app.get("/api/notifications/subscriptions", getSubscriptions);
 app.get("/api/notifications/preferences", getPreferences);

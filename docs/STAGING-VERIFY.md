@@ -101,6 +101,12 @@ contract predicate only — it is **not** the M3 byte-match gate. The full gate
 the check logic is locked without a live server:
 `packages/e2e/staging-verify.test.ts` (run `npm run test --workspace=packages/e2e`).
 
+`packages/api/tests/staging-verify.integration.test.ts` closes the other half:
+it boots the real Express app (seeded SQLite + mocked Redis) on an ephemeral
+port and runs the unmodified `runChecks()` against it over real HTTP, so the
+local dry-run below is CI-enforced rather than manual
+(run `npm run test --workspace=packages/api`).
+
 ## Ownership / escalation
 
 Staging provisioning and dashboard actions are the DevOps/board lane. The

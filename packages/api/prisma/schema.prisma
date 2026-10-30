@@ -101,6 +101,7 @@ model NotificationSubscription {
 
   logs NotificationLog[]
 
+  @@unique([endpoint, airportId])
   @@index([id, createdAt])
   @@index([airportId, createdAt])
   @@map("notification_subscriptions")

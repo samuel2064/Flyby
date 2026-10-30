@@ -241,6 +241,86 @@ describe("POST /api/notifications/subscribe", () => {
   });
 });
 
+describe("POST /api/notifications/subscribe — idempotent re-subscribe (TIR-359)", () => {
+  it("returns 200 and the same id when the same endpoint re-subscribes for the same airport", async () => {
+    const endpoint = `https://example.com/push/dup-${Date.now()}`;
+    const keys = { p256dh: "dup-1", auth: "dup-1" };
+
+    const first = await request(app)
+      .post("/api/notifications/subscribe")
+      .send({ endpoint, keys, airportId });
+    expect(first.status).toBe(201);
+
+    const second = await request(app)
+      .post("/api/notifications/subscribe")
+      .send({ endpoint, keys, airportId });
+    expect(second.status).toBe(200);
+    expect(second.body.data.id).toBe(first.body.data.id);
+
+    const rows = await prisma.notificationSubscription.findMany({ where: { endpoint, airportId } });
+    expect(rows).toHaveLength(1);
+  });
+
+  it("refreshes keys on re-subscribe without creating a new row", async () => {
+    const endpoint = `https://example.com/push/refresh-${Date.now()}`;
+
+    await request(app)
+      .post("/api/notifications/subscribe")
+      .send({ endpoint, keys: { p256dh: "old", auth: "old" }, airportId });
+
+    const res = await request(app)
+      .post("/api/notifications/subscribe")
+      .send({ endpoint, keys: { p256dh: "new", auth: "new" }, airportId });
+    expect(res.status).toBe(200);
+
+    const rows = await prisma.notificationSubscription.findMany({ where: { endpoint, airportId } });
+    expect(rows).toHaveLength(1);
+    expect(JSON.parse(rows[0].keys).p256dh).toBe("new");
+  });
+
+  it("still allows the same endpoint to subscribe to a different airport", async () => {
+    const airport2 = await prisma.airport.findFirst({ where: { id: { not: airportId } } });
+    if (!airport2) return;
+
+    const endpoint = `https://example.com/push/cross-airport-${Date.now()}`;
+    const keys = { p256dh: "x", auth: "x" };
+
+    const first = await request(app)
+      .post("/api/notifications/subscribe")
+      .send({ endpoint, keys, airportId });
+    expect(first.status).toBe(201);
+
+    const second = await request(app)
+      .post("/api/notifications/subscribe")
+      .send({ endpoint, keys, airportId: airport2.id });
+    expect(second.status).toBe(201);
+    expect(second.body.data.id).not.toBe(first.body.data.id);
+  });
+
+  it("upgrades an anonymous subscription to the authenticated user on re-subscribe", async () => {
+    const endpoint = `https://example.com/push/anon-upgrade-${Date.now()}`;
+    const keys = { p256dh: "anon", auth: "anon" };
+
+    const first = await request(app)
+      .post("/api/notifications/subscribe")
+      .send({ endpoint, keys, airportId });
+    expect(first.status).toBe(201);
+
+    const user = await createTestUser(`upgrade-${Date.now()}@example.com`);
+    const token = await getAuthToken(user.id);
+
+    const second = await request(app)
+      .post("/api/notifications/subscribe")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ endpoint, keys, airportId });
+    expect(second.status).toBe(200);
+    expect(second.body.data.id).toBe(first.body.data.id);
+
+    const row = await prisma.notificationSubscription.findUnique({ where: { id: first.body.data.id } });
+    expect(row!.userId).toBe(user.id);
+  });
+});
+
 describe("GET /api/notifications/subscriptions", () => {
   it("returns 401 without auth", async () => {
     const res = await request(app).get("/api/notifications/subscriptions");
@@ -507,5 +587,131 @@ describe("DELETE /api/notifications/subscriptions/:id", () => {
 
     const res = await request(app).delete(`/api/notifications/subscriptions/${subId}`);
     expect(res.status).toBe(401);
+  });
+});
+
+describe("POST /api/notifications/subscribe — auth guard & robustness (TIR-358/TIR-359)", () => {
+  it("rejects a non-string airportId with 400 (no crash)", async () => {
+    const res = await request(app)
+      .post("/api/notifications/subscribe")
+      .send({
+        endpoint: "https://example.com/push/bad-type",
+        keys: { p256dh: "k", auth: "a" },
+        airportId: { evil: true },
+      });
+    expect(res.status).toBe(400);
+    expect(res.body).toHaveProperty("error");
+  });
+
+  it("returns 404 for an unknown airportId and the API stays up", async () => {
+    const res = await request(app)
+      .post("/api/notifications/subscribe")
+      .send({
+        endpoint: "https://example.com/push/unknown-airport",
+        keys: { p256dh: "k", auth: "a" },
+        airportId: "does-not-exist-airport",
+      });
+    expect(res.status).toBe(404);
+    expect(res.body.error).toBe("Airport not found");
+
+    // TIR-358 regression: one malformed request must never kill the process.
+    const health = await request(app).get("/api/health");
+    expect(health.status).toBe(200);
+  });
+
+  it("rejects a malformed bearer token with 401 instead of treating it as anonymous", async () => {
+    const res = await request(app)
+      .post("/api/notifications/subscribe")
+      .set("Authorization", "Bearer not-a-jwt")
+      .send({
+        endpoint: "https://example.com/push/bad-token",
+        keys: { p256dh: "k", auth: "a" },
+        airportId,
+      });
+    expect(res.status).toBe(401);
+  });
+
+  it("ignores a client-supplied body userId for anonymous callers", async () => {
+    const endpoint = `https://example.com/push/ignore-body-user-${Date.now()}`;
+    const res = await request(app)
+      .post("/api/notifications/subscribe")
+      .send({ endpoint, keys: { p256dh: "k", auth: "a" }, airportId, userId: "attacker-supplied-id" });
+    expect(res.status).toBe(201);
+
+    const row = await prisma.notificationSubscription.findUnique({ where: { id: res.body.data.id } });
+    expect(row!.userId).toBeNull();
+  });
+});
+
+describe("DELETE /api/notifications/subscribe — endpoint-scoped unsubscribe (TIR-359)", () => {
+  it("returns 401 without auth", async () => {
+    const res = await request(app)
+      .delete("/api/notifications/subscribe")
+      .send({ endpoint: "https://example.com/push/whatever" });
+    expect(res.status).toBe(401);
+  });
+
+  it("returns 400 when endpoint is missing", async () => {
+    const user = await createTestUser(`unsub-missing-${Date.now()}@example.com`);
+    const token = await getAuthToken(user.id);
+    const res = await request(app)
+      .delete("/api/notifications/subscribe")
+      .set("Authorization", `Bearer ${token}`)
+      .send({});
+    expect(res.status).toBe(400);
+  });
+
+  it("returns 404 for an unknown endpoint", async () => {
+    const user = await createTestUser(`unsub-404-${Date.now()}@example.com`);
+    const token = await getAuthToken(user.id);
+    const res = await request(app)
+      .delete("/api/notifications/subscribe")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ endpoint: `https://example.com/push/nope-${Date.now()}` });
+    expect(res.status).toBe(404);
+  });
+
+  it("removes the caller's subscription by endpoint", async () => {
+    const user = await createTestUser(`unsub-owner-${Date.now()}@example.com`);
+    const token = await getAuthToken(user.id);
+    const endpoint = `https://example.com/push/unsub-owner-${Date.now()}`;
+
+    const createRes = await request(app)
+      .post("/api/notifications/subscribe")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ endpoint, keys: { p256dh: "k", auth: "a" }, airportId });
+    expect(createRes.status).toBe(201);
+
+    const res = await request(app)
+      .delete("/api/notifications/subscribe")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ endpoint, airportId });
+    expect(res.status).toBe(200);
+    expect(res.body.data.deleted).toBe(1);
+
+    const row = await prisma.notificationSubscription.findFirst({ where: { endpoint } });
+    expect(row).toBeNull();
+  });
+
+  it("returns 403 when another user tries to remove the subscription", async () => {
+    const owner = await createTestUser(`unsub-a-${Date.now()}@example.com`);
+    const ownerToken = await getAuthToken(owner.id);
+    const other = await createTestUser(`unsub-b-${Date.now()}@example.com`);
+    const otherToken = await getAuthToken(other.id);
+    const endpoint = `https://example.com/push/unsub-other-${Date.now()}`;
+
+    await request(app)
+      .post("/api/notifications/subscribe")
+      .set("Authorization", `Bearer ${ownerToken}`)
+      .send({ endpoint, keys: { p256dh: "k", auth: "a" }, airportId });
+
+    const res = await request(app)
+      .delete("/api/notifications/subscribe")
+      .set("Authorization", `Bearer ${otherToken}`)
+      .send({ endpoint });
+    expect(res.status).toBe(403);
+
+    const row = await prisma.notificationSubscription.findFirst({ where: { endpoint } });
+    expect(row).not.toBeNull();
   });
 });
