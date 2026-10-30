@@ -1,6 +1,6 @@
 # Flyby MVP Test Status Report
 
-**Date:** 2026-09-21  
+**Date:** 2026-10-30  
 **Founding Engineer:** Founding Engineer Agent  
 **Task:** Ongoing QA maintenance
 
@@ -12,11 +12,11 @@ All automated tests are passing. The Flyby MVP has comprehensive test coverage f
 
 | Metric | Status |
 |--------|--------|
-| Backend Tests | 800/800 passing (100%) - 40 test files |
+| Backend Tests | 875/875 passing (100%) - 40 test files |
 | Frontend Tests | 382/382 passing (100%) - 30 test files |
-| E2E Config Tests | 8/8 passing (Playwright port-override + render.yaml blueprint contract) |
+| E2E Config Tests | 21/21 passing (Playwright port-override + render.yaml blueprint contract + staging-verify harness) |
 | E2E Tests | 20/20 passing (100%) Ã¢â‚¬â€ verified on override ports 3199/3299 |
-| **Total** | **1207/1207 passing (100%)** |
+| **Total** | **1298/1298 passing (100%)** |
 | Backend Coverage | 90.78% statements / 86.2% branches (threshold: 70%) |
 | Frontend Coverage | 90.41% statements / 84.18% branches (threshold: 70%) |
 | CI Pipeline | Configured (GitHub Actions) |
@@ -29,7 +29,7 @@ All automated tests are passing. The Flyby MVP has comprehensive test coverage f
 
 ## Backend Test Coverage (`packages/api/tests/`)
 
-33 test files: `api.test.ts`, `airports.errors.test.ts`, `airports.forecasts.test.ts`, `auth.test.ts`, `waitTimeUtils.test.ts`, `me.test.ts`, `middleware.test.ts`, `seed.test.ts`, `server.test.ts`, `agents.test.ts`, `checkpoints.edge-cases.test.ts`, `checkpoints.latest.test.ts`, `checkpoints.predict.test.ts`, `checkpoints.stats.test.ts`, `dashboard.errors.test.ts`, `dashboard.test.ts`, `deploy-compat.test.ts`, `deploy-compat-qa.test.ts`, `docker.test.ts`, `metrics.test.ts`, `notifications.autotrigger.test.ts`, `notifications.errors.test.ts`, `notifications.preferences.test.ts`, `notifications.send.test.ts`, `notifications.test.ts`, `prisma.test.ts`, `rateLimits.test.ts`, `report-delete.test.ts`, `report-flag.test.ts`, `users.errors.test.ts`, `validation.test.ts`, `wait-stats.test.ts`, `wait-time-reporting.test.ts`, and related suites.
+40 test files (representative list): `api.test.ts`, `airports.errors.test.ts`, `airports.forecasts.test.ts`, `auth.test.ts`, `waitTimeUtils.test.ts`, `me.test.ts`, `middleware.test.ts`, `seed.test.ts`, `server.test.ts`, `agents.test.ts`, `checkpoints.edge-cases.test.ts`, `checkpoints.latest.test.ts`, `checkpoints.predict.test.ts`, `checkpoints.stats.test.ts`, `dashboard.errors.test.ts`, `dashboard.test.ts`, `deploy-compat.test.ts`, `deploy-compat-qa.test.ts`, `docker.test.ts`, `metrics.test.ts`, `notifications.autotrigger.test.ts`, `notifications.errors.test.ts`, `notifications.preferences.test.ts`, `notifications.send.test.ts`, `notifications.test.ts`, `prisma.test.ts`, `rateLimits.test.ts`, `report-delete.test.ts`, `report-flag.test.ts`, `users.errors.test.ts`, `validation.test.ts`, `wait-stats.test.ts`, `wait-time-reporting.test.ts`, and related suites.
 
 Coverage areas: API endpoints, SSE streaming, seed logic, JWT auth, wait-time calculation, health/error/security middleware, input validation, rate limiting, notification subscribe/send/preferences/auto-trigger with per-subscriber dispatch (threshold, spike, leave-now multiplier, per-subscriber cooldown), checkpoint aggregated stats, pattern-based predict/forecast, batched airport forecasts (predict-parity, deterministic bestHours, no-fabrication on empty), admin report deletion (auth fail-closed, audit log), one-row-per-checkpoint latest-report-wins semantics on traveler-facing checkpoint list endpoints, report abuse flagging (flag endpoint validation, session dedupe 409, flag-count exclusion from wait math at >=3 flags, moderation queue), field aliases, lineType support, metrics, Prisma integration, and performance/edge cases.
 
@@ -50,7 +50,7 @@ Coverage areas: API endpoints, SSE streaming, seed logic, JWT auth, wait-time ca
 
 ## Frontend Test Coverage (`packages/web/tests/`)
 
-29 test files: page tests (Search, Airport, Checkpoint, Dashboard, Home, Login, Signup, NotFound, Profile), component tests (ReportModal, ErrorBoundary, Skeleton, AirportSearch, NotificationPreferences, NotifyToggle), context tests (AuthContext), route tests (ProtectedRoute), hook tests (useApi, useApiMutation, useDebounce, useSse, useOfflineQueue, usePushNotification, useRefreshInterval), and offline queue tests (unit, integration, IndexedDB, node env).
+30 test files: page tests (Search, Airport, Checkpoint, Dashboard, Home, Login, Signup, NotFound, Profile), component tests (ReportModal, ErrorBoundary, Skeleton, AirportSearch, NotificationPreferences, NotifyToggle), context tests (AuthContext), route tests (ProtectedRoute), hook tests (useApi, useApiMutation, useDebounce, useSse, useOfflineQueue, usePushNotification, useRefreshInterval), and offline queue tests (unit, integration, IndexedDB, node env).
 
 ### Coverage Breakdown (verified 2026-09-20)
 
@@ -103,10 +103,10 @@ Coverage areas: API endpoints, SSE streaming, seed logic, JWT auth, wait-time ca
 | Criteria | Status | Notes |
 |----------|--------|-------|
 | Test plan documented | Done | `docs/TEST-PLAN.md` exists |
-| Tests run locally | Done | `npm test` passes (952 unit/config tests) |
+| Tests run locally | Done | `npm test` passes (1278 unit/config tests) |
 | Tests run in CI | Done | GitHub Actions configured |
 | Coverage > 70% | Done | All metrics exceed threshold (90%+ statements) |
-| E2E tests written | Done | 5 Playwright specs, 17 tests |
+| E2E tests written | Done | 5 Playwright specs, 20 tests |
 | Manual QA checklist | Done | `docs/MANUAL-QA-CHECKLIST.md` |
 
 ---
@@ -115,7 +115,7 @@ Coverage areas: API endpoints, SSE streaming, seed logic, JWT auth, wait-time ca
 
 | Item | Status |
 |--------|--------|
-| Automated tests | 1001/1001 passing (618 API + 364 Web + 2 e2e config + 17 E2E) |
+| Automated tests | 1298/1298 passing (875 API + 382 Web + 21 e2e config + 20 E2E) |
 | Coverage > 70% | Exceeded (API 90.78% / Web 90.41% statements) |
 | E2E coverage | 5 specs covering core flows, port-conflict resilient |
 | Lint | Clean (API + Web) |
@@ -127,5 +127,5 @@ Coverage areas: API endpoints, SSE streaming, seed logic, JWT auth, wait-time ca
 
 ---
 
-*Last updated: 2026-09-21*  
+*Last updated: 2026-10-30*  
 *Author: Founding Engineer*

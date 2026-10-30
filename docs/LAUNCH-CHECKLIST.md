@@ -27,7 +27,7 @@ the linked doc is the source of truth - do not improvise commands here.
 
 ### Staging Verification (one command)
 ```bash
-node scripts/staging-verify.mjs \
+npm run verify:staging -- \
   --api https://flyby-api-staging.onrender.com \
   --web https://flyby-web-staging.onrender.com \
   --report tmp/staging-verify-staging.json
@@ -35,6 +35,7 @@ node scripts/staging-verify.mjs \
 Covers: `/api/health` + services ok, `NODE_ENV=production`, 51-airport seed,
 `apt-` id shapes, checkpoint detail, `ck-`-slug resolution, vapid key,
 SSE connect frame, web index/PWA/`sw.js`. Exit 0 = contract-alive.
+Full checklist (automated + manual halves): `docs/STAGING-VERIFY.md`.
 Then the 32-probe corpus: `node scripts/contract-compare.mjs --candidate <staging-api> --no-prod`.
 
 ### Manual staging spot-checks
