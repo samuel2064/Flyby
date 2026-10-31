@@ -1,8 +1,10 @@
 # Flyby Convergence Decision Brief (TIR-339)
 
 **Author:** Founding Engineer
-**Date:** 2026-10-31
-**Status:** Decision requested from CEO. Gates M3 prod verification and M4 cutover.
+**Date:** 2026-10-31 (decision record added)
+**Status:** **Decision in — Option A approved by the CEO** (2026-09-25, reaffirmed
+2026-10-19). Remaining gates are board/DevOps actions, not the direction choice.
+See §1a. Gates M3 prod byte-compare and M4 cutover.
 **Companion docs:** `docs/M2-POSTGRES-RUNBOOK.md`, `docs/LAUNCH-CHECKLIST.md`, `docs/STAGING-VERIFY.md`, `scripts/approved-divergences.json`
 
 > Option labels below follow the A/B/C framing already on TIR-339. If the
@@ -20,6 +22,30 @@ Two codebases implement Flyby's API:
 
 They have diverged. Exactly one must become the writer-of-record for production
 data, or we define a durable split. The CEO must choose the direction.
+
+## 1a. Decision record — the CEO has already chosen Option A
+
+The direction is **not** still open. The CEO approved Option A twice on TIR-339:
+
+- **2026-09-25** — *"Decision made: Option A - the monorepo becomes the single
+  deploy target."* Options B and C explicitly rejected. Hard constraints set:
+  (1) no public-surface regression on launch day incl. QA mock-era alias routes,
+  (2) staging URL green before anything touches `flyby-api`/`flyby-web`,
+  (3) `DATABASE_URL`/Redis env wiring confirmed before cutover, (4) a tested
+  rollback path.
+- **2026-10-19** — *"Decision: Option A … Approved,"* with six conditions of
+  approval: migration sequence + rollback plan first; staging green before prod;
+  launch-guarded contract tests green in **both** suites; QA alias routes honored
+  or probes retargeted (QA sign-off); **data parity** ("No prod data loss.
+  Non-negotiable."); and a final CEO go/no-go before the production flip.
+
+**Correction to the TIR-466 check-in:** its line *"CEO decision needed on
+convergence option"* is stale — the decision is on record since 2026-09-25.
+So too is *"Deploy repo has: live features (stats, moderation, opaque IDs) not in
+monorepo"* (stale since M1, §2). The live gates are the **conditions**, not the
+option: TIR-345 (prod restore, needed for the M3 byte-compare), the Render
+staging Blueprint import, and the staging PG/Redis envs — all board/DevOps
+actions.
 
 ## 2. Key finding — the divergence is smaller than the check-in records
 
@@ -78,24 +104,28 @@ Deploy repo stays runtime; monorepo becomes the feature lane; contract held by
   the contract drifts; and "keep serving" is not actually happening — the prod
   API has been dark since Sep 26.
 
-## 4. Recommendation
+## 4. Recommendation (approved)
 
 **Option A.** It is the direction the codebase is already built and tested for;
-Options B/C both require re-doing work that is already green. The remaining
-inputs for A are board/DevOps actions already enumerated (TIR-29 Render
-blueprint import; staging PG/Redis envs), not engineering work.
+Options B/C both require re-doing work that is already green. The CEO approved
+this direction on 2026-09-25 and reaffirmed it 2026-10-19 (§1a); the remaining
+inputs are board/DevOps actions already enumerated (TIR-29 Render blueprint
+import; staging PG/Redis envs), not engineering work.
 
-## 5. Decision needed and its gate
+## 5. What remains — the approval conditions, not the direction
 
-- **Decision:** approve Option A as the convergence direction (or pick B/C and I
-  re-scope immediately).
-- **What the decision does *not* need to wait for:** M3 *byte-compare* vs prod
-  requires the prod API restored (TIR-345). But the **contract** gate
-  (`npm run verify:staging` and `node scripts/contract-compare.mjs --no-prod`)
-  runs the moment staging exists. So the direction decision can be made now;
-  only the final byte-compare is gated on TIR-345 → TIR-365.
-- **Timeline:** engineering side is ready today; schedule = board decision +
-  Render blueprint import.
+The direction is settled (§1a). The open items are the CEO's conditions of
+approval, not an A/B/C choice:
+
+- **Staging green before prod** — M3 *byte-compare* vs prod requires the prod API
+  restored (TIR-345). The **contract** gate (`npm run verify:staging` and
+  `node scripts/contract-compare.mjs --no-prod`) runs the moment staging exists;
+  only the final byte-match gate is gated on TIR-345 → TIR-365.
+- **Migration sequence + rollback plan, data parity** — `docs/M2-POSTGRES-RUNBOOK.md`.
+- **QA alias routes honored or probes retargeted** — `scripts/approved-divergences.json`.
+- **Final CEO go/no-go** before the production flip.
+- **Timeline:** engineering side is ready today; schedule = Render blueprint
+  import + staging PG/Redis envs.
 
 ## 6. Engineering readiness (verified 2026-10-31)
 
