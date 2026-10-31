@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } 
 import app from "../src/app";
 import { PrismaClient } from "@prisma/client";
 import { hashPassword, signToken } from "../src/auth";
+import { prisma as appPrisma } from "../src/prisma";
 
 const prisma = new PrismaClient();
 
@@ -318,6 +319,40 @@ describe("POST /api/notifications/subscribe — idempotent re-subscribe (TIR-359
 
     const row = await prisma.notificationSubscription.findUnique({ where: { id: first.body.data.id } });
     expect(row!.userId).toBe(user.id);
+  });
+
+  it("resolves a concurrent duplicate subscribe (Prisma P2002) as an idempotent 200, not a 500", async () => {
+    const endpoint = `https://example.com/push/race-${Date.now()}`;
+    const keys = { p256dh: "race", auth: "race" };
+
+    // The racing request already won the insert for this (endpoint, airportId);
+    // simulate the loser seeing an empty findFirst then hitting the unique
+    // constraint on create.
+    const seeded = await prisma.notificationSubscription.create({
+      data: { endpoint, keys: JSON.stringify(keys), airportId },
+    });
+
+    const findFirstSpy = vi
+      .spyOn(appPrisma.notificationSubscription, "findFirst")
+      .mockResolvedValueOnce(null as never);
+    const createSpy = vi
+      .spyOn(appPrisma.notificationSubscription, "create")
+      .mockRejectedValueOnce(Object.assign(new Error("Unique constraint failed"), { code: "P2002" }));
+
+    try {
+      const res = await request(app)
+        .post("/api/notifications/subscribe")
+        .send({ endpoint, keys, airportId });
+
+      expect(res.status).toBe(200);
+      expect(res.body.data.id).toBe(seeded.id);
+
+      const rows = await prisma.notificationSubscription.findMany({ where: { endpoint, airportId } });
+      expect(rows).toHaveLength(1);
+    } finally {
+      findFirstSpy.mockRestore();
+      createSpy.mockRestore();
+    }
   });
 });
 

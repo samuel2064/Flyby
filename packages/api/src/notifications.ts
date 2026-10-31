@@ -498,12 +498,7 @@ export async function subscribe(req: Request, res: Response) {
     // (`compatSubscribe`): find the existing (endpoint, airportId) row, refresh
     // its keys/user, and only `create` when none exists. 201 on create, 200 on
     // idempotent re-subscribe.
-    const existing = await prisma.notificationSubscription.findFirst({
-      where: { endpoint, airportId },
-      orderBy: { createdAt: "asc" },
-    });
-
-    if (existing) {
+    const refreshExisting = async (existing: { id: string; userId: string | null }) => {
       const updated = await prisma.notificationSubscription.update({
         where: { id: existing.id },
         data: {
@@ -512,19 +507,46 @@ export async function subscribe(req: Request, res: Response) {
         },
       });
       res.status(200).json({ data: { id: updated.id, airportId, createdAt: updated.createdAt } });
+    };
+
+    const existing = await prisma.notificationSubscription.findFirst({
+      where: { endpoint, airportId },
+      orderBy: { createdAt: "asc" },
+    });
+
+    if (existing) {
+      await refreshExisting(existing);
       return;
     }
 
-    const subscription = await prisma.notificationSubscription.create({
-      data: {
-        endpoint,
-        keys: JSON.stringify(keyObj),
-        airportId,
-        userId: userId ?? undefined,
-      },
-    });
+    try {
+      const subscription = await prisma.notificationSubscription.create({
+        data: {
+          endpoint,
+          keys: JSON.stringify(keyObj),
+          airportId,
+          userId: userId ?? undefined,
+        },
+      });
 
-    res.status(201).json({ data: { id: subscription.id, airportId, createdAt: subscription.createdAt } });
+      res.status(201).json({ data: { id: subscription.id, airportId, createdAt: subscription.createdAt } });
+    } catch (createErr) {
+      // TIR-359 race: two concurrent first-time subscribes for the same
+      // (endpoint, airportId) can both pass the findFirst check, and the second
+      // create is then rejected by the `@@unique([endpoint, airportId])`
+      // constraint (Prisma P2002). That is a benign race, not a server fault —
+      // resolve it as an idempotent re-subscribe (200) so the client never sees
+      // a spurious 500 and the dedup contract holds under concurrency.
+      const code = (createErr as { code?: string } | null)?.code;
+      if (code === "P2002") {
+        const raced = await prisma.notificationSubscription.findFirst({ where: { endpoint, airportId } });
+        if (raced) {
+          await refreshExisting(raced);
+          return;
+        }
+      }
+      throw createErr;
+    }
   } catch (err) {
     // TIR-358: never let a DB error escape as an unhandled rejection — report a
     // 500 and keep the process (and every other route) serving.
