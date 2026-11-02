@@ -25,6 +25,10 @@ never be used against Postgres.
 
 1. **Connect Railway** — complete the Paperclip Railway connection card
    (OAuth, requires the responsible user). This is the only human-gated step.
+   A brand-new Railway account may also require a payment method for the Hobby
+   plan; if so, that billing/budget decision is the same human gate. As a
+   headless alternative, a project token supplied as the Paperclip secret
+   `RAILWAY_TOKEN` lets the CLI deploy without browser OAuth.
 2. **New Project → Deploy from GitHub repo** → `samuel2064/Flyby`, branch
    `monorepo-candidate`. Railway reads `railway.json`.
 3. **Add PostgreSQL** (project → New → Database → PostgreSQL). Railway injects
@@ -37,17 +41,31 @@ never be used against Postgres.
    - `NODE_ENV = production`
    - `ADMIN_API_KEY` (generate: `openssl rand -hex 32`; required for
      `DELETE /api/reports/:id`, else returns 503)
-   - `JWT_SECRET` (generate a secure random value)
+   - `JWT_SECRET` (generate a secure random value). Not hard-required — if
+     unset, `auth.ts` generates a random secret per process (`crypto.randomBytes`),
+     which invalidates all sessions on every restart/redeploy and across
+     instances. Set it for stable auth.
+   - `ALLOWED_ORIGINS` (comma-separated web origins). Not required for
+     `/api/health`, but in production with it unset the CORS layer reflects any
+     origin (`app.ts`); set it to the PWA origin(s) to restrict CORS.
    - `PORT` — leave unset; Railway injects it and `server.ts` honours `process.env.PORT`
 6. **Deploy.** Verify:
    - `GET https://<railway-app>.up.railway.app/api/health` → 200
    - `GET https://<railway-app>.up.railway.app/api/wait-times?airport=SEA` → 200
-7. **Seed (optional, first deploy only):** the airport/checkpoint catalog is
-   needed for real data. Run `npx tsx packages/api/prisma/seed.ts` in the Railway
-   shell once, only if `/api/wait-times` returns empty for known airports.
+7. **Seed — first deploy only, and it is DESTRUCTIVE.** The airport/checkpoint
+   catalog is needed for real data. `packages/api/prisma/seed.ts` begins with
+   `deleteMany` on `waitTime`, `checkpoint`, `airport`, and **`user`**, so it
+   must never be run against a database with production data. Do **not** wire it
+   into `preDeployCommand`. Run `npx tsx packages/api/prisma/seed.ts` in the
+   Railway shell exactly once, on the empty first-deploy DB, and only if
+   `/api/wait-times?airport=SEA` returns empty for a known airport. (The Render
+   staging blueprint runs it in `preDeployCommand`; that is safe only because
+   staging is disposable — it is NOT a pattern to copy to prod.)
 8. **DNS / clients:** point the PWA `VITE_API_BASE_URL` and any hardcoded
-   endpoints at the Railway URL (or attach a custom domain in Railway). Then
-   close TIR-452 → unblocks TIR-365 → TIR-364 → TIR-345.
+   endpoints at the Railway URL. Note: `flyby-api.onrender.com` is a
+   Render-managed name and **cannot** be CNAME'd to Railway — use the Railway
+   URL directly, or attach a domain the company controls (custom domain in
+   Railway). Then close TIR-452 → unblocks TIR-365 → TIR-364 → TIR-345.
 
 ## Rollback
 
