@@ -1,6 +1,8 @@
 name: Live API smoke check
 
 on:
+  push:
+    branches: [main]
   schedule:
     - cron: '*/15 * * * *'
   workflow_dispatch:
@@ -44,6 +46,27 @@ jobs:
           # catch-all 404 {"error":"not_found"} means the build is stale.
           probe "/api/airports/JFK/forecasts" '"airportCode":"JFK"'
           probe "/api/checkpoints/ck-jfk-main/predict" '"checkpointId":"ck-jfk-main"'
+          # TIR-313: the 51-airport expansion must be live. A missing ATL in
+          # the airport list (or a 404 on its wait-times) means the deployed
+          # build still carries the old 5-airport data file.
+          probe "/api/airports" '"code":"ATL"'
+          probe "/api/checkpoints?airport=ATL" '"Domestic North Checkpoint A"'
+
+          # TIR-309 live guard: subscription endpoints must never leak push
+          # credentials or PII. An "endpoint"/"userId" field in a public
+          # response means the TIR-294 redaction lapsed again.
+          code=$(curl -s -o /tmp/subs.json -w '%{http_code}' --max-time 90 "$BASE_URL/api/subscriptions" || echo 000)
+          if [ "$code" != "200" ]; then
+            echo "Response body:"
+            head -c 500 /tmp/subs.json || true
+            fail "GET /api/subscriptions returned HTTP $code (expected 200)"
+          fi
+          if grep -q '"endpoint"\|"userId"\|"p256dh"\|"auth"' /tmp/subs.json; then
+            echo "Response body:"
+            head -c 500 /tmp/subs.json || true
+            fail "GET /api/subscriptions leaks push credentials / userId publicly - TIR-309 SEC leak"
+          fi
+          echo "OK    /api/subscriptions -> 200, redacted (TIR-309 contract)"
 
           # TIR-298 live guard: unknown airports must return app-level 404,
           # never a fabricated wait-time record.
@@ -55,16 +78,92 @@ jobs:
           fi
           echo "OK    /api/wait-times?airport=YYY -> 404 (TIR-298 contract)"
 
-          # TIR-299 live guard: the admin delete route must exist in prod.
-          # Without a key it must answer 401 (key configured on Render) or 503
-          # (key not yet configured) - a 404 catch-all body means the deployed
-          # build is missing the route.
+          # TIR-299 live guard: the admin delete route must exist in prod and
+          # the ADMIN_API_KEY is provisioned (render.yaml c142ba7). 401 = key
+          # required (correct). Anything else - 404 catch-all (route missing)
+          # or 503 (key env lost in a future config regression) - must fail.
+          # Tightened 2025: 503 used to be tolerated while the key was pending.
           code=$(curl -s -o /tmp/del_probe.json -w '%{http_code}' --max-time 90 -X DELETE "$BASE_URL/api/reports/rpt_0" || echo 000)
-          if [ "$code" != "401" ] && [ "$code" != "503" ]; then
+          if [ "$code" != "401" ]; then
             echo "Response body:"
             head -c 500 /tmp/del_probe.json || true
-            fail "DELETE /api/reports/rpt_0 without key returned HTTP $code (expected 401/503) - TIR-299 route missing from deployed build"
+            fail "DELETE /api/reports/rpt_0 without key returned HTTP $code (expected 401) - route/auth regression or ADMIN_API_KEY missing in prod"
           fi
-          echo "OK    DELETE /api/reports/rpt_0 -> $code (TIR-299 route present, auth enforced)"
+          echo "OK    DELETE /api/reports/rpt_0 -> 401 (route present, admin key provisioned and enforced)"
+
+          # Write-path guard (zero fabrication): a deliberately invalid report
+          # must be answered 400 with the {errors:[...]} contract. The write
+          # surface (route, CORS, validation) is exercised end to end; nothing
+          # is persisted because validation rejects before the store.
+          code=$(curl -s -o /tmp/wt_bad.json -w '%{http_code}' --max-time 90 -X POST -H 'Content-Type: application/json' -d '{}' "$BASE_URL/api/wait-times" || echo 000)
+          if [ "$code" != "400" ] || ! grep -q '"errors"' /tmp/wt_bad.json; then
+            echo "Response body:"
+            head -c 500 /tmp/wt_bad.json || true
+            fail "POST /api/wait-times with empty body returned HTTP $code (expected 400 with errors[]) - write path contract broken"
+          fi
+          echo "OK    POST /api/wait-times empty body -> 400 with errors[] (write path guarded)"
+
+          # Aggregation endpoints (TIR-321/322): exist live and stay aggregate-only
+          probe "/api/wait-times/summary" '"airportCount"'
+          probe "/api/airports/JFK/wait-stats" '"airport":"JFK"'
+          code=$(curl -s -o /tmp/stats.json -w '%{http_code}' --max-time 90 "$BASE_URL/api/airports/JFK/wait-stats" || echo 000)
+          if grep -q '"userId"\|"p256dh"\|"auth"\|"endpoint"' /tmp/stats.json; then
+            echo "Response body:"
+            head -c 400 /tmp/stats.json || true
+            fail "wait-stats leaks identifying fields - TIR-309 class defect"
+          fi
+          echo "OK    /api/airports/JFK/wait-stats -> $code (aggregate-only)"
 
           echo "All live smoke checks passed"
+
+  live-web-smoke:
+    name: Live web smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Probe the deployed PWA (retries tolerate Render cold starts)
+        run: |
+          set -uo pipefail
+          fail() { echo "::error::$1"; exit 1; }
+
+          probe() {
+            local path="$1" grep_pattern="$2"
+            local attempt=1 code=000
+            while [ $attempt -le 3 ]; do
+              code=$(curl -sSL --compressed -o /tmp/web.html -w '%{http_code}' --max-time 120 "https://flyby-web.onrender.com$path" || echo 000)
+              if [ "$code" = "200" ] && grep -q "$grep_pattern" /tmp/web.html; then
+                echo "OK    $path -> 200 (attempt $attempt)"
+                return 0
+              fi
+              echo "RETRY $path -> HTTP $code (attempt $attempt)"
+              attempt=$((attempt+1))
+              sleep 45
+            done
+            echo "Response body on final failure:"
+            head -c 2000 /tmp/web.html || true
+            fail "Live web smoke check FAILED for $path after 3 attempts (last HTTP $code)"
+          }
+
+          probe "/" 'id="root"'
+          # SPA rewrite: deep links must serve the app shell (200), not a 404
+          probe "/airports/JFK" 'id="root"'
+
+          echo "All live web smoke checks passed"
+
+      # TIR-323: browser-level DOM smoke for the deployed PWA. Status-code
+      # probes cannot see stale bundles, JS runtime errors, or states that
+      # never resolve - the TIR-312 duplicate-cards defect was only ever
+      # caught by hand. Playwright now does it on every tick.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install web deps
+        # Same pattern as ci.yml's web job: npm ci wants its lockfile in the
+        # working directory; bare `--prefix` breaks on runners without one.
+        working-directory: apps/web
+        run: npm ci --no-audit --no-fund || npm install --no-audit --no-fund
+      - name: Install Playwright chromium
+        run: npx playwright install --with-deps chromium
+        working-directory: apps/web
+      - name: Live DOM smoke
+        run: node apps/web/scripts/live-web-smoke.mjs

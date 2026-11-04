@@ -15,16 +15,16 @@ Malformed JSON bodies return `400 {"error":"bad_request"}`.
 
 | Method | Path           | Response                                                                                |
 | ------ | -------------- | --------------------------------------------------------------------------------------- |
-| GET    | `/api/airports` | `200 {"airports":[{id,code,name,city}]}` — optional `?q=` filters by code/city/name    |
-| GET    | `/api/airports/:code` | `200 {id,code,name,city}` — accepts either the code (`JFK`) or the id (`apt-jfk`); unknown airport `404 {"errors":[{field:"code",message}]}` |
+| GET    | `/api/airports` | `200 {"airports":[{id,code,name,city,timezone}]}` — all 51 supported airports (TIR-313); optional `?q=` filters by code/city/name    |
+| GET    | `/api/airports/:code` | `200 {id,code,name,city,timezone}` — accepts either the code (`JFK`) or the id (`apt-jfk`); unknown airport `404 {"errors":[{field:"code",message}]}` |
 
-Supported airports: JFK, SEA, LAX, ORD, SFO (mirrors `apps/web/src/data/airports.ts`).
+Supported airports: 51 major US airports (JFK, SEA, LAX, ORD, SFO, ATL, DEN, LAS, MCO, ... full list in `data/airports.json`, the single source shared by the API and `apps/web`).
 
 ## Checkpoints
 
 | Method | Path               | Response                                                                                     |
 | ------ | ------------------ | -------------------------------------------------------------------------------------------- |
-| GET    | `/api/checkpoints` | `200 {"checkpoints":[{airport,name}]}` — optional `?airport=<CODE\|apt-id>` or `?airportId=<CODE\|apt-id>` filters |
+| GET    | `/api/checkpoints` | `200 {"checkpoints":[{airport,name}]}` — 164 checkpoints across 51 airports; optional `?airport=<CODE\|apt-id>` or `?airportId=<CODE\|apt-id>` filters |
 
 Unknown airport in `?airport=`/`?airportId=` returns `404 {"errors":[{field:"airport",message}]}`.
 
@@ -55,13 +55,33 @@ Both accept `?horizon=<1-24>` (default 12) and `?days=<1-30>` (default 30). Inva
 - DB read failures answer `500 {"error":"Database unavailable"}` — never a fabricated forecast.
 - Hour bucketing uses the airport's local timezone (`America/New_York` for JFK, etc.).
 
+## Checkpoint history (chart)
+
+| Method | Path                             | Response |
+| ------ | -------------------------------- | -------- |
+| GET    | `/api/checkpoints/:id/history`   | `200 {data:{checkpointId,airportCode,airportName,name,windowHours,bucketMinutes,reportCount,history:[{time,minutes,count}]}}` |
+
+Rolling wait-time history for a checkpoint, from **real reports only** — powers the per-checkpoint
+historical chart (MVP feature #6).
+
+- Accepts `?window=<1-24>` (hours, default 4) and `?bucket=<5\|10\|15\|30\|60>` (minutes, default 30).
+  Invalid values return `400 {"error":"<window\|bucket> must be a positive integer between <min> and <max>"}`;
+  a well-formed but unsupported bucket size returns `400 {"error":"bucket must be one of: 5, 10, 15, 30, 60"}`.
+- `history` is ascending by bucket start time; buckets are epoch-aligned multiples of `bucket`
+  minutes and each point is the rounded average of the reports in that bucket (`count` = reports
+  per bucket).
+- No fabrication: a checkpoint without reports in the window returns `history: []`,
+  `reportCount: 0`. DB read failures answer `500 {"error":"Database unavailable"}`.
+- Id validation matches the forecast endpoints: malformed id → `400 {"error":"Invalid checkpoint id"}`;
+  unknown id → `404 {"error":"Checkpoint not found"}`.
+
 
 ## Wait times
 
 | Method | Path                    | Response                                                                                       |
 | ------ | ----------------------- | ---------------------------------------------------------------------------------------------- |
 | GET    | `/api/wait-times`       | `200 [{airport,checkpoint,waitMinutes,updatedAt}]` — optional `?airport=<CODE\|apt-id>` or `?airportId=<CODE\|apt-id>` (case-insensitive). Known airports with no reports return `200 []`. Unknown airports return `404 {"error":"Airport not found"}`. Records are never fabricated (TIR-298). |
-| POST   | `/api/wait-times`       | `201 {id,...body,waitMinutes,receivedAt}`; body `{airport:string, checkpoint?:string, waitMinutes:positive int}`. Validation errors: `400 {"errors":[...]}`. Rate limit: 30s per user/IP → `429` with `Retry-After`. Alias: `POST /api/wait-times/report` |
+| POST   | `/api/wait-times`       | `201 {id,airport,checkpoint,waitMinutes,receivedAt}`; body `{airport:string, checkpoint?:string, waitMinutes:1-300}`. Unknown airports are rejected at the boundary: `404 {"error":"Airport not found"}` (TIR-314 — no residue to purge later). Validation errors: `400 {"errors":[...]}`. Rate limit: 30s per user/IP → `429` with `Retry-After`. Alias: `POST /api/wait-times/report` |
 
 ## Reports (admin)
 
@@ -78,8 +98,8 @@ delete; ids are the `rpt_<epoch-ms>` values returned by `POST /api/wait-times`.
 
 | Method | Path                          | Response                                                                                          |
 | ------ | ----------------------------- | ------------------------------------------------------------------------------------------------- |
-| POST   | `/api/subscriptions`          | `200/201` flat subscription `{id,endpoint,airportId,airportCode,userId,createdAt,updatedAt}` (aliases: `/api/notifications/subscribe`, `/api/push/subscribe`). Required: endpoint,p256dh,auth,airportId → `400 {"errors":[...]}` |
-| GET    | `/api/subscriptions`          | `200 {"subscriptions":[...]}` (flat rows, p256dh/auth redacted — push credentials are not publicly enumerable) |
+| POST   | `/api/subscriptions`          | `200/201` redacted subscription `{id,airportId,airportCode,createdAt,updatedAt}` (aliases: `/api/notifications/subscribe`, `/api/push/subscribe`). Required: endpoint,p256dh,auth,airportId → `400 {"errors":[...]}` |
+| GET    | `/api/subscriptions`          | `200 {"subscriptions":[...]}` — REDACTED rows only: no `endpoint` (bearer push credential), no `userId`, no `p256dh`/`auth`. Public responses must never expose them (TIR-294/TIR-309). |
 | DELETE | `/api/notifications/:id`      | `200 {"success":true,id}`; unknown id `404`; other user's subscription `403`                      |
 | GET    | `/api/notifications/:userId`  | `200 {subscriptions,total,page,pageSize}` (paginated, `?page=&pageSize=`, p256dh/auth redacted)   |
 
@@ -99,6 +119,13 @@ Per-user limit: 10 subscriptions (non-anonymous).
 | Method | Path                                          | Response                                              |
 | ------ | --------------------------------------------- | ----------------------------------------------------- |
 | GET    | `/api/events` (aliases `/api/wait-times/stream`, `/api/sse`) | `200 text/event-stream` (connect + wait-time-update frames) |
+
+`?airport=<CODE>` filters the stream to that airport. Frames: `{"type":"connected","timestamp"}` on
+open, then `{"type":"wait-time-update","airport","checkpoint","waitMinutes","timestamp"}` — one per
+**accepted report** (`POST /api/wait-times`), fanned out to the clients subscribed to that airport
+(and to clients without a filter). A `: ping` keepalive comment is sent every ~20s so proxies keep
+the connection open; it is invisible to `EventSource`. Nothing is ever synthesized: a stream with no
+reports stays quiet — no fabricated values (TIR-314, same trust principle as TIR-298).
 
 ## Push
 

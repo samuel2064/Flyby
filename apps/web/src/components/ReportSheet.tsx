@@ -1,12 +1,18 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { submitWaitTimeReport } from '../api/waitTimes'
+import { checkpointOptions } from '../data/airports'
+import { canSubmitReport, effectiveCheckpointPick } from '../lib/reportCheckpoint'
+import { extractRateLimitSeconds, formatWaitMessage } from '../lib/rateLimitFeedback'
 import type { WaitLevel } from '../api/types'
 import { waitLevel } from '../api/types'
 
 interface ReportSheetProps {
   open: boolean
   airportCode: string
-  checkpoint: string
+  // Fixed checkpoint (card flow). Omit for picker mode: the traveler chooses
+  // from the airport's real checkpoints - the only way to file the FIRST
+  // report at an airport or for a terminal that has no card yet.
+  checkpoint?: string
   onClose: () => void
   onReported: () => void
 }
@@ -20,20 +26,46 @@ export function ReportSheet({
   onClose,
   onReported,
 }: ReportSheetProps) {
+  const options = checkpointOptions(airportCode)
+  const [pickedCheckpoint, setPickedCheckpoint] = useState<string>('')
   const [minutes, setMinutes] = useState<number>(15)
   const [submitting, setSubmitting] = useState(false)
   const [submitted, setSubmitted] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  // The sheet stays mounted while open/close toggles, so a pick from a
+  // previous airport must never leak into this one: fall back to the first
+  // option whenever the stored pick is not valid for the current airport.
+  const effectivePick = effectiveCheckpointPick(pickedCheckpoint, options)
+  const activeCheckpoint = checkpoint ?? effectivePick
+  const canSubmit = canSubmitReport(activeCheckpoint)
+
+  // Rate-limit feedback: a 429 gives the countdown window; the submit button
+  // stays disabled while it ticks down (mirrors the monorepo design).
+  const [rateLimitUntil, setRateLimitUntil] = useState<number | null>(null)
+  const [nowTick, setNowTick] = useState(() => Date.now())
+
+  useEffect(() => {
+    if (rateLimitUntil === null) return
+    if (rateLimitUntil <= Date.now()) return
+    const timer = window.setInterval(() => setNowTick(Date.now()), 1000)
+    return () => window.clearInterval(timer)
+  }, [rateLimitUntil])
+
+  const secondsLeft =
+    rateLimitUntil === null ? 0 : Math.max(0, Math.ceil((rateLimitUntil - nowTick) / 1000))
+  const rateLimited = rateLimitUntil !== null && secondsLeft > 0
+
   if (!open) return null
 
   async function handleSubmit() {
+    if (!canSubmit) return
     setSubmitting(true)
     setError(null)
     try {
       await submitWaitTimeReport({
         airport: airportCode,
-        checkpoint,
+        checkpoint: activeCheckpoint,
         waitMinutes: minutes,
       })
       setSubmitted(true)
@@ -42,8 +74,14 @@ export function ReportSheet({
         setSubmitted(false)
         onClose()
       }, 1200)
-    } catch {
-      setError('Could not submit your report. Please try again.')
+    } catch (err) {
+      const seconds = extractRateLimitSeconds(err)
+      if (seconds !== null) {
+        setRateLimitUntil(Date.now() + seconds * 1000)
+        setError(null)
+      } else {
+        setError('Could not submit your report. Please try again.')
+      }
     } finally {
       setSubmitting(false)
     }
@@ -72,7 +110,7 @@ export function ReportSheet({
               Report wait time
             </h2>
             <p className="mt-0.5 text-sm text-slate-500">
-              {airportCode} · {checkpoint}
+              {airportCode} · {activeCheckpoint}
             </p>
           </div>
           <button
@@ -100,6 +138,25 @@ export function ReportSheet({
           </p>
         ) : (
           <>
+            {!checkpoint && (
+              <label className="mt-5 block">
+                <span className="text-sm font-semibold text-slate-700">Checkpoint</span>
+                <select
+                  data-testid="checkpoint-picker"
+                  value={effectivePick}
+                  onChange={(e) => setPickedCheckpoint(e.target.value)}
+                  disabled={options.length === 0}
+                  className="mt-2 h-12 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-brand-500/40 disabled:bg-slate-100"
+                >
+                  {options.length === 0 && <option value="">No checkpoints configured</option>}
+                  {options.map((name) => (
+                    <option key={name} value={name}>
+                      {name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
             <fieldset className="mt-5">
               <legend className="text-sm font-semibold text-slate-700">
                 How long is the line right now?
@@ -130,13 +187,28 @@ export function ReportSheet({
                 {error}
               </p>
             )}
+            {rateLimited && (
+              <p
+                role="status"
+                data-testid="rate-limit-countdown"
+                className="mt-3 rounded-xl bg-amber-50 p-3 text-sm font-medium text-amber-900"
+              >
+                {formatWaitMessage(secondsLeft)}
+              </p>
+            )}
             <button
               type="button"
               onClick={handleSubmit}
-              disabled={submitting}
+              disabled={submitting || !canSubmit || rateLimited}
               className="mt-5 inline-flex h-12 w-full items-center justify-center rounded-xl bg-brand-500 text-base font-semibold text-white transition hover:bg-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-500/40 disabled:opacity-60"
             >
-              {submitting ? 'Submitting…' : 'Submit report'}
+              {submitting
+                ? 'Submitting…'
+                : rateLimited
+                  ? formatWaitMessage(secondsLeft)
+                  : canSubmit
+                    ? 'Submit report'
+                    : 'Pick a checkpoint first'}
             </button>
           </>
         )}

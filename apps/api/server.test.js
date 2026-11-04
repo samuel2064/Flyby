@@ -6,11 +6,15 @@
 
 delete process.env.DATABASE_URL; // force in-memory mode: deterministic, no DB
 process.env.PORT = '3787'; // dedicated test port; CI boot check uses 3000
+process.env.SSE_KEEPALIVE_MS = '250'; // make keepalive frames observable in tests
 
 const { test, after } = require('node:test');
 const assert = require('node:assert/strict');
+const http = require('node:http');
 
-const { httpServer, computeForecast, checkpointIdFor, findCheckpointById } = require('./server.js');
+const { httpServer, computeForecast, checkpointIdFor, findCheckpointById, bucketWaitHistory } =
+  require('./server.js');
+const sharedData = require('../../data/airports.json');
 
 const BASE = `http://127.0.0.1:${process.env.PORT}`;
 
@@ -252,16 +256,20 @@ test('batch forecasts return one forecast per checkpoint for a known airport', a
   assert.equal(body.data.timezone, 'America/New_York');
   assert.equal(body.data.historyDays, 30);
   assert.equal(body.data.horizon, 12);
-  assert.equal(body.data.forecasts.length, 1);
-  const forecast = body.data.forecasts[0];
-  assert.equal(forecast.checkpointId, 'ck-jfk-main');
-  assert.equal(forecast.name, 'Main');
-  assert.equal(forecast.code, null);
-  assert.equal(forecast.terminal, null);
+  // One forecast per configured checkpoint (TIR-313: JFK now carries its real
+  // terminal checkpoints in addition to the launch-era 'Main').
+  const jfkCheckpoints = sharedData.checkpointsByAirport.JFK;
+  assert.equal(body.data.forecasts.length, jfkCheckpoints.length);
+  assert.ok(body.data.forecasts.length >= 1);
+  const main = body.data.forecasts.find((f) => f.checkpointId === 'ck-jfk-main');
+  assert.ok(main, 'ck-jfk-main forecast must be present');
+  assert.equal(main.name, 'Main');
+  assert.equal(main.code, null);
+  assert.equal(main.terminal, null);
   // No persisted reports -> empty forecast, never fabricated values (TIR-298 trust principle)
-  assert.equal(forecast.sampleCount, 0);
-  assert.deepEqual(forecast.predictions, []);
-  assert.deepEqual(forecast.bestHours, []);
+  assert.equal(main.sampleCount, 0);
+  assert.deepEqual(main.predictions, []);
+  assert.deepEqual(main.bestHours, []);
 });
 
 test('batch forecasts normalize lowercase airport codes', async () => {
@@ -451,4 +459,988 @@ test('computeForecast blends live consensus into the imminent slots without doub
     const matching = core.predictions.find((p) => p.hour === best.hour);
     assert.ok(matching && matching.source !== 'fallback');
   }
+});
+
+// --- TIR-313: 51-airport expansion (shared data/airports.json) ----------------
+
+test('GET /api/airports returns the full expanded list (51) with complete shape', async () => {
+  await ready;
+  const res = await fetch(`${BASE}/api/airports`);
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.ok(Array.isArray(body.airports));
+  assert.equal(body.airports.length, 51);
+  for (const a of body.airports) {
+    assert.ok(a.id && typeof a.id === 'string', `airport ${a.code} needs id`);
+    assert.match(a.code, /^[A-Z]{3}$/);
+    assert.ok(a.name && a.city && a.timezone);
+  }
+  const jfk = body.airports.find((a) => a.code === 'JFK');
+  assert.equal(jfk.id, 'apt-jfk');
+  assert.equal(jfk.name, 'John F. Kennedy International');
+  assert.equal(jfk.timezone, 'America/New_York');
+  // Expansion unlock: ATL (and the other 45 new airports) are first-class now.
+  assert.ok(body.airports.some((a) => a.code === 'ATL'));
+});
+
+test('GET /api/airports?q= filters across the expanded list', async () => {
+  await ready;
+  const res = await fetch(`${BASE}/api/airports?q=atlanta`);
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.airports.length, 1);
+  assert.equal(body.airports[0].code, 'ATL');
+});
+
+test('expanded airports are canonical: wait-times no longer 404s for ATL', async () => {
+  await ready;
+  const res = await fetch(`${BASE}/api/wait-times?airport=ATL`);
+  assert.equal(res.status, 200);
+  assert.deepEqual(await res.json(), []);
+});
+
+test('GET /api/checkpoints exposes real checkpoint names for expanded airports', async () => {
+  await ready;
+  const res = await fetch(`${BASE}/api/checkpoints?airport=ATL`);
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.airport, 'ATL');
+  assert.ok(body.checkpoints.length >= 4);
+  assert.ok(body.checkpoints.some((c) => c.name === 'Domestic North Checkpoint A'));
+
+  const all = await fetch(`${BASE}/api/checkpoints`);
+  const allBody = await all.json();
+  const expectedTotal = Object.values(sharedData.checkpointsByAirport).reduce(
+    (sum, list) => sum + list.length, 0);
+  assert.equal(allBody.checkpoints.length, expectedTotal);
+});
+
+test('launch airports keep their Main checkpoint so production reports stay valid', async () => {
+  for (const code of ['JFK', 'SEA', 'LAX', 'ORD', 'SFO']) {
+    const names = sharedData.checkpointsByAirport[code];
+    assert.equal(names[0], 'Main', `${code} must keep Main first`);
+    assert.equal(checkpointIdFor(code, 'Main'), `ck-${code.toLowerCase()}-main`);
+    const found = findCheckpointById(`ck-${code.toLowerCase()}-main`);
+    assert.ok(found, `ck-${code.toLowerCase()}-main must resolve`);
+  }
+});
+
+test('stable checkpoint ids derive for real multi-word checkpoint names', async () => {
+  const id = 'ck-atl-domestic-north-checkpoint-a';
+  const found = findCheckpointById(id);
+  assert.ok(found);
+  assert.equal(found.airport.code, 'ATL');
+  assert.equal(found.name, 'Domestic North Checkpoint A');
+});
+
+test('predict for a report-less expanded checkpoint returns empty predictions (no fabrication)', async () => {
+  await ready;
+  const res = await fetch(`${BASE}/api/checkpoints/ck-atl-domestic-north-checkpoint-a/predict`);
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.data.sampleCount, 0);
+  assert.deepEqual(body.data.predictions, []);
+  assert.deepEqual(body.data.bestHours, []);
+  assert.equal(body.data.checkpointId, 'ck-atl-domestic-north-checkpoint-a');
+});
+
+test('apt-id lookups work for every supported airport, not just the launch five', async () => {
+  await ready;
+  const res = await fetch(`${BASE}/api/wait-times?airportId=apt-atl`);
+  assert.equal(res.status, 200);
+  assert.deepEqual(await res.json(), []);
+  const byCode = await fetch(`${BASE}/api/airports/atL`);
+  assert.equal(byCode.status, 200);
+  assert.equal((await byCode.json()).code, 'ATL');
+});
+
+// --- TIR-314: the SSE stream carries only REAL wait-time updates ----------------
+// The old handler emitted a fabricated {checkpoint:'Main', waitMinutes:random}
+// frame every 2 seconds - overwriting real reports and inventing data at
+// report-less airports. Now the stream is quiet until a real report is
+// accepted, and accepted reports fan out to the subscribed clients.
+
+// Minimal SSE client over fetch: parses `data:` frames off the raw stream.
+// `close()` aborts the underlying connection so the test server can shut down.
+function openSSE(airport) {
+  const controller = new AbortController();
+  const events = [];
+  const connected = (async () => {
+    const query = airport ? `?airport=${encodeURIComponent(airport)}` : '';
+    const res = await fetch(`${BASE}/api/events${query}`, { signal: controller.signal });
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    (async () => {
+      try {
+        // eslint-disable-next-line no-constant-condition
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          let idx;
+          while ((idx = buffer.indexOf('\n\n')) !== -1) {
+            const frame = buffer.slice(0, idx);
+            buffer = buffer.slice(idx + 2);
+            // Only `data:` lines carry events; keepalive comments (": ping") are
+            // intentionally ignored here, exactly like EventSource does.
+            for (const line of frame.split('\n')) {
+              if (line.startsWith('data: ')) events.push(JSON.parse(line.slice(6)));
+            }
+          }
+        }
+      } catch {
+        // aborted by close()
+      }
+    })();
+    return res;
+  })();
+  return {
+    events,
+    connected,
+    async waitFor(predicate, timeoutMs) {
+      const start = Date.now();
+      while (Date.now() - start < timeoutMs) {
+        const hit = events.find(predicate);
+        if (hit) return hit;
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      return events.find(predicate) || null;
+    },
+    async collectQuietly(durationMs) {
+      await new Promise((resolve) => setTimeout(resolve, durationMs));
+      return events;
+    },
+    close() {
+      controller.abort();
+    },
+  };
+}
+
+test('SSE opens with a connected event and then stays quiet - no fabricated updates', async () => {
+  await ready;
+  // ATL is canonical but report-less in in-memory mode: the stream must show
+  // the honest empty state, not invented numbers.
+  const client = openSSE('ATL');
+  try {
+    const connected = await client.waitFor((ev) => ev.type === 'connected', 5000);
+    assert.ok(connected, 'connected frame must arrive');
+    assert.ok(!isNaN(Date.parse(connected.timestamp)), 'connected carries an ISO timestamp');
+    // The old implementation fabricated a wait-time-update every 2s; watching
+    // for longer than that interval is the regression guard.
+    const events = await client.collectQuietly(2600);
+    assert.ok(
+      !events.some((ev) => ev.type === 'wait-time-update'),
+      `stream must not fabricate wait-time-update frames, got: ${JSON.stringify(events.filter((e) => e.type === 'wait-time-update'))}`,
+    );
+  } finally {
+    client.close();
+  }
+});
+
+test('accepted reports fan out over SSE to subscribed and unfiltered clients only', async () => {
+  await ready;
+  const jfk = openSSE('JFK');
+  const sea = openSSE('SEA');
+  const unfiltered = openSSE(null);
+  try {
+    await Promise.all([
+      jfk.waitFor((ev) => ev.type === 'connected', 5000),
+      sea.waitFor((ev) => ev.type === 'connected', 5000),
+      unfiltered.waitFor((ev) => ev.type === 'connected', 5000),
+    ]);
+
+    const res = await fetch(`${BASE}/api/wait-times`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-User-Id': 'sse-fanout-user-1' },
+      body: JSON.stringify({
+        airport: 'JFK',
+        checkpoint: 'Terminal 4 Security',
+        waitMinutes: 37,
+      }),
+    });
+    assert.equal(res.status, 201);
+
+    const onJfk = await jfk.waitFor(
+      (ev) => ev.type === 'wait-time-update' && ev.checkpoint === 'Terminal 4 Security',
+      5000,
+    );
+    assert.ok(onJfk, 'JFK-subscribed client must receive the real report');
+    assert.equal(onJfk.airport, 'JFK');
+    assert.equal(onJfk.waitMinutes, 37);
+    assert.ok(!isNaN(Date.parse(onJfk.timestamp)), 'update carries the report timestamp');
+
+    const onUnfiltered = await unfiltered.waitFor(
+      (ev) => ev.type === 'wait-time-update' && ev.checkpoint === 'Terminal 4 Security',
+      5000,
+    );
+    assert.ok(onUnfiltered, 'unfiltered client must receive the real report');
+    assert.equal(onUnfiltered.waitMinutes, 37);
+
+    // Airport filtering: SEA subscribers must not see JFK's report.
+    const seaEvents = await sea.collectQuietly(600);
+    assert.ok(
+      !seaEvents.some((ev) => ev.type === 'wait-time-update'),
+      'SEA-subscribed client must not receive JFK updates',
+    );
+  } finally {
+    jfk.close();
+    sea.close();
+    unfiltered.close();
+  }
+});
+
+test('reports for unknown airports are rejected at the boundary (404, never persisted or broadcast)', async () => {
+  await ready;
+  const client = openSSE(null);
+  try {
+    await client.waitFor((ev) => ev.type === 'connected', 5000);
+    const before = client.events.length;
+
+    const res = await fetch(`${BASE}/api/wait-times`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-User-Id': 'sse-unknown-airport-user' },
+      body: JSON.stringify({ airport: 'QALOCAL', checkpoint: 'Main', waitMinutes: 10 }),
+    });
+    assert.equal(res.status, 404);
+    assert.deepEqual(await res.json(), { error: 'Airport not found' });
+
+    const events = await client.collectQuietly(500);
+    assert.equal(events.length, before, 'rejected reports must not be broadcast');
+  } finally {
+    client.close();
+  }
+});
+
+test('report waitMinutes is bounded to 1-300', async () => {
+  await ready;
+  for (const minutes of [301, 0, -5]) {
+    const res = await fetch(`${BASE}/api/wait-times`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-User-Id': `sse-bounds-user-${minutes}` },
+      body: JSON.stringify({ airport: 'JFK', checkpoint: 'Main', waitMinutes: minutes }),
+    });
+    assert.equal(res.status, 400, `waitMinutes=${minutes}`);
+    const body = await res.json();
+    assert.ok(Array.isArray(body.errors));
+    assert.ok(body.errors.some((e) => e.field === 'waitMinutes'));
+  }
+});
+
+test('accepted report responses carry the canonical uppercase airport code', async () => {
+  await ready;
+  const res = await fetch(`${BASE}/api/wait-times`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-User-Id': 'sse-canonical-user' },
+    body: JSON.stringify({ airport: 'jfk', checkpoint: 'Main', waitMinutes: 12 }),
+  });
+  assert.equal(res.status, 201);
+  const body = await res.json();
+  assert.equal(body.airport, 'JFK');
+  assert.equal(body.checkpoint, 'Main');
+  assert.equal(body.waitMinutes, 12);
+  assert.ok(body.id && body.receivedAt);
+});
+
+// --- GET /api/checkpoints/:id/history (checkpoint chart) ----------------------
+
+const BASE_TS = Date.parse('2026-09-23T12:00:00Z');
+function historyReports(...specs) {
+  // [minutesAgo, waitMinutes]
+  return specs.map(([minutesAgo, waitMinutes]) => ({
+    minutes: waitMinutes,
+    reportedAt: new Date(BASE_TS - minutesAgo * 60 * 1000),
+  }));
+}
+
+test('bucketWaitHistory returns empty for no reports (never fabricated)', () => {
+  assert.deepEqual(bucketWaitHistory([], 30), []);
+  assert.deepEqual(bucketWaitHistory(undefined, 30), []);
+});
+
+test('bucketWaitHistory averages reports in the same epoch-aligned bucket', () => {
+  const result = bucketWaitHistory(historyReports([25, 10], [10, 20]), 30);
+  assert.deepEqual(result, [{ time: '2026-09-23T11:30:00.000Z', minutes: 15, count: 2 }]);
+});
+
+test('bucketWaitHistory rounds bucket averages and carries per-bucket counts', () => {
+  const result = bucketWaitHistory(historyReports([25, 10], [10, 21]), 30);
+  // (10 + 21) / 2 = 15.5 -> 16
+  assert.deepEqual(result, [{ time: '2026-09-23T11:30:00.000Z', minutes: 16, count: 2 }]);
+});
+
+test('bucketWaitHistory separates distinct buckets and sorts ascending', () => {
+  const unordered = [
+    { minutes: 30, reportedAt: new Date(BASE_TS - 5 * 60 * 1000) }, // 11:55 -> 11:30 bucket
+    { minutes: 10, reportedAt: new Date(BASE_TS - 40 * 60 * 1000) }, // 11:20 -> 11:00 bucket
+    { minutes: 12, reportedAt: new Date(BASE_TS - 25 * 60 * 1000) }, // 11:35 -> 11:30 bucket
+  ];
+  const result = bucketWaitHistory(unordered, 30);
+  assert.deepEqual(result, [
+    { time: '2026-09-23T11:00:00.000Z', minutes: 10, count: 1 },
+    { time: '2026-09-23T11:30:00.000Z', minutes: 21, count: 2 },
+  ]);
+});
+
+test('bucketWaitHistory honors custom bucket sizes', () => {
+  const result = bucketWaitHistory(historyReports([25, 10], [5, 20]), 10);
+  assert.deepEqual(result, [
+    { time: '2026-09-23T11:30:00.000Z', minutes: 10, count: 1 },
+    { time: '2026-09-23T11:50:00.000Z', minutes: 20, count: 1 },
+  ]);
+});
+
+test('bucketWaitHistory accepts ISO strings as well as Dates', () => {
+  const result = bucketWaitHistory(
+    [{ minutes: 10, reportedAt: '2026-09-23T11:35:00.000Z' }],
+    30,
+  );
+  assert.deepEqual(result, [{ time: '2026-09-23T11:30:00.000Z', minutes: 10, count: 1 }]);
+});
+
+test('bucketWaitHistory skips reports with unparsable timestamps', () => {
+  const good = { minutes: 10, reportedAt: new Date(BASE_TS) };
+  const bad = { minutes: 50, reportedAt: 'not-a-date' };
+  assert.deepEqual(bucketWaitHistory([good, bad], 30), [
+    { time: '2026-09-23T12:00:00.000Z', minutes: 10, count: 1 },
+  ]);
+});
+
+test('bucketWaitHistory rejects unsupported bucket sizes', () => {
+  assert.throws(() => bucketWaitHistory([], 7));
+  assert.throws(() => bucketWaitHistory([], 0));
+});
+
+test('history endpoint returns 400 for a malformed checkpoint id', async () => {
+  await ready;
+  const res = await fetch(`${BASE}/api/checkpoints/Main%20Checkpoint/history`);
+  assert.equal(res.status, 400);
+  assert.deepEqual(await res.json(), { error: 'Invalid checkpoint id' });
+});
+
+test('history endpoint returns 404 for an unknown well-formed checkpoint id', async () => {
+  await ready;
+  const res = await fetch(`${BASE}/api/checkpoints/ck-jfk-north-terminal-2/history`);
+  assert.equal(res.status, 404);
+  assert.deepEqual(await res.json(), { error: 'Checkpoint not found' });
+});
+
+test('history endpoint returns an empty (never fabricated) history for a known checkpoint', async () => {
+  await ready;
+  const res = await fetch(`${BASE}/api/checkpoints/ck-jfk-main/history`);
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.data.checkpointId, 'ck-jfk-main');
+  assert.equal(body.data.airportCode, 'JFK');
+  assert.equal(body.data.name, 'Main');
+  assert.equal(body.data.windowHours, 4);
+  assert.equal(body.data.bucketMinutes, 30);
+  assert.equal(body.data.reportCount, 0); // in-memory mode persists nothing
+  assert.deepEqual(body.data.history, []);
+});
+
+test('history endpoint validates the window and bucket query parameters', async () => {
+  await ready;
+  for (const qs of ['window=0', 'window=25', 'window=abc', 'bucket=7', 'bucket=120', 'bucket=xyz']) {
+    const res = await fetch(`${BASE}/api/checkpoints/ck-jfk-main/history?${qs}`);
+    assert.equal(res.status, 400, qs);
+    const body = await res.json();
+    assert.ok(typeof body.error === 'string' && body.error.length > 0, qs);
+  }
+  const ok = await fetch(`${BASE}/api/checkpoints/ck-jfk-main/history?window=6&bucket=15`);
+  assert.equal(ok.status, 200);
+  const okBody = await ok.json();
+  assert.equal(okBody.data.windowHours, 6);
+  assert.equal(okBody.data.bucketMinutes, 15);
+});
+
+// --- TIR-314 regression: SSE streams real reports only, never fabricated ----
+// Before TIR-314 the stream ticked out RANDOM wait-time updates. These tests
+// lock in: connect frame only until a real report lands; real reports reach
+// scoped clients with the exact payload; other airports stay silent; unscoped
+// clients receive everything; keepalive comments never surface as events.
+
+// Collects parsed data-frames (keepalive/comment frames excluded, exactly as
+// EventSource sees them). If predicate(ev) returns true the stream closes
+// early; otherwise collection ends after timeoutMs and resolves with events.
+function collectSseEvents(path, timeoutMs, predicate) {
+  return new Promise((resolve, reject) => {
+    const events = [];
+    let finished = false;
+    const done = () => { if (!finished) { finished = true; resolve(events); } };
+    const req = http.get(`${BASE}${path}`, (res) => {
+      assert.equal(res.statusCode, 200);
+      assert.equal(res.headers['content-type'], 'text/event-stream');
+      let buffer = '';
+      res.on('data', (chunk) => {
+        buffer += chunk.toString();
+        let idx;
+        while ((idx = buffer.indexOf('\n\n')) !== -1) {
+          const frame = buffer.slice(0, idx);
+          buffer = buffer.slice(idx + 2);
+          if (!frame.trim() || frame.startsWith(':')) continue; // keepalive
+          for (const line of frame.split('\n')) {
+            if (line.startsWith('data:')) {
+              const ev = JSON.parse(line.slice(5).trim());
+              events.push(ev);
+              if (predicate && predicate(ev)) { req.destroy(); return done(); }
+            }
+          }
+        }
+      });
+      res.on('end', done);
+      res.on('error', done);
+    });
+    req.on('error', (err) => (finished ? done() : reject(err)));
+    setTimeout(() => { req.destroy(); done(); }, timeoutMs).unref();
+  });
+}
+
+// Same loop but returns the raw text so keepalive comments can be asserted
+// (they keep the connection alive through proxies but must stay invisible to
+// event consumers).
+function collectSseRaw(path, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    let raw = '';
+    let finished = false;
+    const done = () => { if (!finished) { finished = true; resolve(raw); } };
+    const req = http.get(`${BASE}${path}`, (res) => {
+      res.on('data', (chunk) => { raw += chunk.toString(); });
+      res.on('end', done);
+      res.on('error', done);
+    });
+    req.on('error', (err) => (finished ? done() : reject(err)));
+    setTimeout(() => { req.destroy(); done(); }, timeoutMs).unref();
+  });
+}
+
+const postReport = (identity, report) =>
+  fetch(`${BASE}/api/wait-times`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-User-Id': identity },
+    body: JSON.stringify(report),
+  });
+
+test('SSE connect sends a connected frame and never fabricated wait-time events', async () => {
+  await ready;
+  // No reports are posted while this collection runs (serial suite, earlier
+  // POST tests are finished) - any wait-time-update here would be fabricated.
+  const events = await collectSseEvents('/api/events?airport=SEA', 700);
+  assert.ok(events.some((e) => e.type === 'connected'), 'expected a connected frame');
+  assert.equal(
+    events.filter((e) => e.type === 'wait-time-update').length,
+    0,
+    'stream must stay silent (no fabricated updates) until a real report lands',
+  );
+});
+
+test('a real report reaches scoped clients with the exact payload', async () => {
+  await ready;
+  const collected = collectSseEvents(
+    '/api/events?airport=SEA',
+    4000,
+    (ev) => ev.type === 'wait-time-update',
+  );
+  await new Promise((r) => setTimeout(r, 150)); // let the subscription register
+  const post = await postReport('sse-stream-test-1', { airport: 'SEA', checkpoint: 'Main', waitMinutes: 22 });
+  assert.equal(post.status, 201);
+  const events = await collected;
+  const update = events.find((e) => e.type === 'wait-time-update');
+  assert.ok(update, 'client must receive the broadcast');
+  assert.equal(update.airport, 'SEA');
+  assert.equal(update.checkpoint, 'Main');
+  assert.equal(update.waitMinutes, 22);
+  assert.ok(update.timestamp, 'broadcast carries the acceptance timestamp');
+});
+
+test("broadcasts are scoped: a client subscribed to another airport hears nothing", async () => {
+  await ready;
+  const collected = collectSseEvents('/api/events?airport=LAX', 900);
+  await new Promise((r) => setTimeout(r, 150));
+  const post = await postReport('sse-stream-test-2', { airport: 'JFK', checkpoint: 'Main', waitMinutes: 33 });
+  assert.equal(post.status, 201);
+  const events = await collected;
+  assert.equal(
+    events.filter((e) => e.type === 'wait-time-update').length,
+    0,
+    'an LAX subscriber must not receive JFK updates',
+  );
+});
+
+test('unscoped clients receive every airports broadcast', async () => {
+  await ready;
+  const collected = collectSseEvents('/api/events', 4000, (ev) => ev.type === 'wait-time-update');
+  await new Promise((r) => setTimeout(r, 150));
+  const post = await postReport('sse-stream-test-3', { airport: 'JFK', checkpoint: 'Main', waitMinutes: 14 });
+  assert.equal(post.status, 201);
+  const events = await collected;
+  const update = events.find((e) => e.type === 'wait-time-update');
+  assert.ok(update && update.airport === 'JFK');
+});
+
+test('keepalive comments arrive on the wire but stay invisible to event consumers', async () => {
+  await ready;
+  const raw = await collectSseRaw('/api/events?airport=SEA', 700);
+  assert.ok(raw.includes(': ping'), 'keepalive frames must keep Render idle-out away');
+  const events = await collectSseEvents('/api/events?airport=SEA', 700);
+  assert.ok(events.every((e) => e.type === 'connected'), 'keepalives parse as comments, not events');
+});
+
+// --- TIR-309: subscription redaction must never lapse -------------------------
+// An FCM endpoint is a bearer credential; userId is correlatable PII. Every
+// public subscription path is guarded here so the TIR-294 redaction cannot
+// partially lapse again (today it leaked via flatSubscription on the DB path).
+
+const SECRET_KEYS = ['endpoint', 'userId', 'p256dh', 'auth'];
+
+test('GET /api/subscriptions returns only redacted records', async () => {
+  await ready;
+  const res = await fetch(`${BASE}/api/subscriptions`);
+  assert.equal(res.status, 200);
+  const rows = (await res.json()).subscriptions;
+  assert.ok(rows.length >= 1); // seeded QA fixture remains visible
+  for (const row of rows) {
+    for (const key of SECRET_KEYS) {
+      assert.equal(row[key], undefined, `subscription record must not expose ${key}`);
+    }
+    assert.ok(row.id && row.airportCode);
+  }
+  assert.ok(rows.some((r) => r.id === 'sub-001' && r.airportCode === 'JFK'));
+});
+
+test('GET /api/notifications/subscriptions alias is equally redacted', async () => {
+  await ready;
+  const res = await fetch(`${BASE}/api/notifications/subscriptions`);
+  assert.equal(res.status, 200);
+  for (const row of (await res.json()).subscriptions) {
+    for (const key of SECRET_KEYS) assert.equal(row[key], undefined);
+  }
+});
+
+test('POST /api/subscriptions 201 echo returns the caller-supplied endpoint but never the push keys', async () => {
+  await ready;
+  // Design (c8871f8): the subscribe echo returns the flat record with the
+  // endpoint the caller just supplied. Secrets p256dh/auth are never echoed.
+  const res = await fetch(`${BASE}/api/subscriptions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      endpoint: 'https://fcm.googleapis.com/fcm/send/secret-echo-test-1',
+      p256dh: 'BK_echo_secret',
+      auth: 'auth_echo_secret',
+      airportId: 'apt-sea',
+      userId: 'redaction-test-user',
+    }),
+  });
+  assert.equal(res.status, 201);
+  const body = await res.json();
+  assert.equal(body.p256dh, undefined, '201 echo must not include p256dh');
+  assert.equal(body.auth, undefined, '201 echo must not include auth');
+  assert.ok(body.id && body.airportCode === 'SEA');
+  assert.equal(body.endpoint, 'https://fcm.googleapis.com/fcm/send/secret-echo-test-1');
+});
+
+test('POST /api/subscriptions idempotent update (200) strips keys the same way', async () => {
+  await ready;
+  const res = await fetch(`${BASE}/api/subscriptions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      endpoint: 'https://fcm.googleapis.com/fcm/send/secret-echo-test-1',
+      p256dh: 'BK_echo_secret_2',
+      auth: 'auth_echo_secret_2',
+      airportId: 'apt-sea',
+      userId: 'redaction-test-user',
+    }),
+  });
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.p256dh, undefined, '200 echo must not include p256dh');
+  assert.equal(body.auth, undefined, '200 echo must not include auth');
+});
+
+test('per-user list (GET /api/notifications/:userId) is redacted and does not leak other users', async () => {
+  await ready;
+  const res = await fetch(`${BASE}/api/notifications/redaction-test-user`);
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.ok(body.subscriptions.length >= 1);
+  for (const row of body.subscriptions) {
+    for (const key of SECRET_KEYS) assert.equal(row[key], undefined);
+  }
+});
+
+// --- Subscription delete aliases: same guarded handler everywhere --------------
+// The alias routes used a mock handler that claimed success without deleting
+// anything (DB untouched, in-memory only-if-present, no 404, no ownership
+// check). The aliases must behave identically to DELETE /api/notifications/:id.
+
+test('alias DELETE of an unknown id returns 404, not a fabricated success', async () => {
+  await ready;
+  for (const path of ['/api/subscriptions', '/api/push/subscriptions', '/api/notifications/subscriptions']) {
+    const res = await fetch(`${BASE}${path}/sub_does_not_exist`, { method: 'DELETE' });
+    assert.equal(res.status, 404, `${path} unknown id`);
+    assert.deepEqual(await res.json(), { error: 'not_found', id: 'sub_does_not_exist' });
+  }
+});
+
+test('alias DELETE actually removes the record', async () => {
+  await ready;
+  await fetch(`${BASE}/api/subscriptions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      endpoint: 'https://fcm.googleapis.com/fcm/send/alias-delete-test',
+      p256dh: 'BK_alias',
+      auth: 'auth_alias',
+      airportId: 'apt-ord',
+      userId: 'alias-delete-user',
+    }),
+  });
+  const before = await fetch(`${BASE}/api/notifications/alias-delete-user`);
+  const beforeBody = await before.json();
+  const created = beforeBody.subscriptions.find((s) => s.airportCode === 'ORD');
+  assert.ok(created, 'record created');
+
+  const del = await fetch(`${BASE}/api/subscriptions/${created.id}`, { method: 'DELETE' });
+  assert.equal(del.status, 200);
+  assert.deepEqual(await del.json(), { success: true, id: created.id });
+
+  const after = await fetch(`${BASE}/api/notifications/alias-delete-user`);
+  const afterBody = await after.json();
+  assert.ok(!afterBody.subscriptions.some((s) => s.id === created.id), 'record is gone, not merely reported gone');
+
+  const again = await fetch(`${BASE}/api/subscriptions/${created.id}`, { method: 'DELETE' });
+  assert.equal(again.status, 404, 'second delete is a truthful 404, not success');
+});
+
+test('alias DELETE enforces the ownership guard on mismatched X-User-Id', async () => {
+  await ready;
+  await fetch(`${BASE}/api/subscriptions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      endpoint: 'https://fcm.googleapis.com/fcm/send/alias-guard-test',
+      p256dh: 'BK_guard',
+      auth: 'auth_guard',
+      airportId: 'apt-jfk',
+      userId: 'alias-guard-owner',
+    }),
+  });
+  const list = await fetch(`${BASE}/api/notifications/alias-guard-owner`);
+  const created = (await list.json()).subscriptions.find((s) => s.airportCode === 'JFK');
+  assert.ok(created, 'record created');
+
+  const forbiddenDel = await fetch(`${BASE}/api/push/subscriptions/${created.id}`, {
+    method: 'DELETE',
+    headers: { 'X-User-Id': 'alias-guard-attacker' },
+  });
+  assert.equal(forbiddenDel.status, 403);
+  assert.deepEqual(await forbiddenDel.json(), {
+    error: 'forbidden',
+    message: "Cannot delete another user's subscription",
+  });
+
+  const stillThere = await fetch(`${BASE}/api/notifications/alias-guard-owner`);
+  assert.ok((await stillThere.json()).subscriptions.some((s) => s.id === created.id));
+
+  // cleanup by the owner (canonical behavior also reachable on the aliases)
+  const okDel = await fetch(`${BASE}/api/push/subscriptions/${created.id}`, {
+    method: 'DELETE',
+    headers: { 'X-User-Id': 'alias-guard-owner' },
+  });
+  assert.equal(okDel.status, 200);
+});
+
+// --- TIR-321: GET /api/airports/:id/wait-stats --------------------------------
+// Per-airport anonymous aggregates for the Phase 2 dashboard. Endpoint tests
+// run in in-memory mode (no persisted reports) so they assert the sane empty
+// response; the aggregation math is covered by computeWaitStats unit tests.
+
+const { computeWaitStats } = require('./server.js');
+
+test('wait-stats returns 404 for an unknown airport (no fabricated stats)', async () => {
+  await ready;
+  const res = await fetch(`${BASE}/api/airports/ZZZ/wait-stats`);
+  assert.equal(res.status, 404);
+});
+
+test('wait-stats for an airport with no reports returns sane empty buckets, not errors', async () => {
+  await ready;
+  const res = await fetch(`${BASE}/api/airports/SEA/wait-stats`);
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.airport, 'SEA');
+  assert.equal(body.sampleSize, 0);
+  assert.deepEqual(body.overall, {
+    averageMinutes: null,
+    p50Minutes: null,
+    p90Minutes: null,
+    sampleSize: 0,
+  });
+  assert.equal(body.byHourOfDay.length, 24, 'all 24 hour buckets are always present');
+  assert.equal(body.byDayOfWeek.length, 7, 'all 7 day-of-week buckets are always present');
+  assert.ok(body.byHourOfDay.every((b, i) => b.hour === i && b.sampleSize === 0 && b.averageMinutes === null));
+  assert.ok(body.byDayOfWeek.every((b, i) => b.day === i && b.sampleSize === 0 && b.averageMinutes === null));
+  assert.equal(typeof body.timezone, 'string');
+  assert.deepEqual(Object.keys(body).sort(),
+    ['airport', 'airportName', 'byDayOfWeek', 'byHourOfDay', 'cacheTtlSeconds', 'generatedAt', 'overall', 'sampleSize', 'timezone'].sort(),
+    'aggregate-only response: no report records, userIds, or endpoints');
+});
+
+test('wait-stats accepts the airport id (apt-jfk) as well as the code', async () => {
+  await ready;
+  const res = await fetch(`${BASE}/api/airports/apt-jfk/wait-stats`);
+  assert.equal(res.status, 200);
+  assert.equal((await res.json()).airport, 'JFK');
+});
+
+test('computeWaitStats aggregates overall stats and percentiles', () => {
+  const reports = [5, 10, 10, 20, 40, 60, 90, 120].map((minutes, i) => ({
+    minutes,
+    reportedAt: new Date(Date.UTC(2026, 0, 5 + i, 12, 0, 0)), // all in one hour bucket
+  }));
+  const stats = computeWaitStats('UTC', reports);
+  assert.equal(stats.sampleSize, 8);
+  assert.equal(stats.overall.averageMinutes, 44.4);
+  assert.equal(stats.overall.p50Minutes, 20);
+  assert.equal(stats.overall.p90Minutes, 120);
+});
+
+test('computeWaitStats buckets by airport-local hour and day-of-week', () => {
+  // 2026-01-05T20:30Z is Mon 15:30 in America/New_York (UTC-5): it must land
+  // in hour 15 / Monday, not the UTC-facing hour 20.
+  const report = { minutes: 30, reportedAt: new Date('2026-01-05T20:30:00Z') };
+  const stats = computeWaitStats('America/New_York', [report]);
+  assert.equal(stats.byHourOfDay[15].sampleSize, 1);
+  assert.equal(stats.byHourOfDay[15].averageMinutes, 30);
+  assert.equal(stats.byHourOfDay[20].sampleSize, 0);
+  assert.equal(stats.byDayOfWeek[1].sampleSize, 1, 'Monday');
+  for (const day of stats.byDayOfWeek) {
+    if (day.day !== 1) assert.equal(day.sampleSize, 0);
+  }
+});
+
+test('computeWaitStats with no reports returns empty buckets, never fabricated values', () => {
+  const stats = computeWaitStats('UTC', []);
+  assert.equal(stats.sampleSize, 0);
+  assert.equal(stats.overall.averageMinutes, null);
+  assert.equal(stats.byHourOfDay.length, 24);
+  assert.ok(stats.byHourOfDay.every((b) => b.sampleSize === 0 && b.p50Minutes === null && b.p90Minutes === null));
+  assert.ok(stats.byDayOfWeek.every((b) => b.sampleSize === 0));
+});
+
+// --- TIR-321 (scope merge): GET /api/wait-times/summary ----------------------
+// Cross-airport overview: latest reported wait + trend direction per airport.
+// Endpoint tests run in in-memory mode (no persisted reports) so they assert
+// the sane empty overview; trend/latest math is covered by unit tests.
+
+const { computeWaitTimesSummary } = require('./server.js');
+
+test('wait-times summary lists every supported airport, even with no data', async () => {
+  await ready;
+  const res = await fetch(`${BASE}/api/wait-times/summary`);
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.airportCount, 51);
+  assert.equal(body.airports.length, 51);
+  assert.equal(body.airportsWithData, 0);
+  const jfk = body.airports.find((a) => a.airport === 'JFK');
+  assert.ok(jfk, 'JFK present');
+  assert.equal(jfk.latestWaitMinutes, null);
+  assert.equal(jfk.latestReportedAt, null);
+  assert.equal(jfk.sampleSize, 0);
+  assert.equal(jfk.trend.direction, null, 'no trend for a report-less airport, never fabricated');
+  assert.deepEqual(
+    Object.keys(jfk).sort(),
+    ['airport', 'airportName', 'timezone', 'latestWaitMinutes', 'latestReportedAt', 'sampleSize', 'trend'].sort(),
+    'aggregate-only per-airport entry: no report records or userIds'
+  );
+});
+
+test('computeWaitTimesSummary picks the latest report per airport', () => {
+  const now = Date.UTC(2026, 0, 10, 12, 0, 0);
+  const reports = new Map([
+    ['JFK', [
+      { minutes: 10, reportedAt: new Date(now - 60 * 60 * 1000) },
+      { minutes: 30, reportedAt: new Date(now - 30 * 60 * 1000) },
+      { minutes: 20, reportedAt: new Date(now - 2 * 60 * 60 * 1000) },
+    ]],
+  ]);
+  const summary = computeWaitTimesSummary(now, reports);
+  const jfk = summary.airports.find((a) => a.airport === 'JFK');
+  assert.equal(jfk.latestWaitMinutes, 30);
+  assert.equal(jfk.latestReportedAt, new Date(now - 30 * 60 * 1000).toISOString());
+  assert.equal(jfk.sampleSize, 3);
+  assert.equal(summary.airportsWithData, 1);
+});
+
+test('computeWaitTimesSummary classifies trend direction from 3h windows', () => {
+  const hour = 60 * 60 * 1000;
+  const now = Date.UTC(2026, 0, 10, 12, 0, 0);
+  const mk = (cur, prev) => new Map([['JFK', [
+    { minutes: cur, reportedAt: new Date(now - hour) },
+    { minutes: prev, reportedAt: new Date(now - 4 * hour) },
+  ]]]);
+  const trendOf = (diff) => computeWaitTimesSummary(now, diff).airports.find((a) => a.airport === 'JFK').trend;
+  assert.equal(trendOf(mk(25, 10)).direction, 'up', '>= 5 min rise');
+  assert.equal(trendOf(mk(5, 15)).direction, 'down', '<= -5 min drop');
+  assert.equal(trendOf(mk(12, 10)).direction, 'flat', 'inside the 5 min band');
+  const shape = trendOf(mk(25, 10));
+  assert.equal(shape.currentAverageMinutes, 25);
+  assert.equal(shape.previousAverageMinutes, 10);
+  assert.equal(shape.currentSampleSize, 1);
+  assert.equal(shape.previousSampleSize, 1);
+  assert.equal(shape.windowHours, 3);
+});
+
+test('computeWaitTimesSummary returns null trend when either window is empty', () => {
+  const now = Date.UTC(2026, 0, 10, 12, 0, 0);
+  const hour = 60 * 60 * 1000;
+  const currentOnly = new Map([['JFK', [{ minutes: 20, reportedAt: new Date(now - hour) }]]]);
+  const staleOnly = new Map([['JFK', [{ minutes: 20, reportedAt: new Date(now - 5 * hour) }]]]);
+  const trendOf = (r) => computeWaitTimesSummary(now, r).airports.find((a) => a.airport === 'JFK').trend;
+  assert.equal(trendOf(currentOnly).direction, null, 'no baseline to compare against');
+  assert.equal(trendOf(staleOnly).direction, null, 'nothing current to compare');
+  assert.equal(trendOf(staleOnly).previousAverageMinutes, 20);
+});
+
+// --- TIR-325: moderation (flag endpoint + review queue) ---------------------
+// The suite runs in in-memory mode (no DB), so write paths assert the
+// fail-closed 503s instead of fabricated success, and guard tests assert
+// 401/400 behavior. Live DB behavior of flag/queue/hide/clear is verified
+// against prod in the TIR-325 completion comment.
+
+const MOD_ADMIN_KEY = ADMIN_KEY;
+
+test('flag endpoint rejects an invalid report id before any DB access', async () => {
+  await ready;
+  const res = await fetch(`${BASE}/api/reports/bad%20id%21/flag`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
+  });
+  assert.equal(res.status, 400);
+});
+
+test('flag endpoint rejects a non-string reason', async () => {
+  await ready;
+  const res = await fetch(`${BASE}/api/reports/rpt_1234567890/flag`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason: 42 }),
+  });
+  assert.equal(res.status, 400);
+});
+
+test('flag endpoint rejects a non-string sessionId (TIR-337)', async () => {
+  await ready;
+  const res = await fetch(`${BASE}/api/reports/rpt_1234567890/flag`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: 42 }),
+  });
+  assert.equal(res.status, 400);
+});
+
+test('flag endpoint rejects an empty sessionId (TIR-337)', async () => {
+  await ready;
+  const res = await fetch(`${BASE}/api/reports/rpt_1234567890/flag`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: '   ' }),
+  });
+  assert.equal(res.status, 400);
+});
+
+test('flag endpoint is fail-closed (503) without a database - no fabricated flag', async () => {
+  await ready;
+  const res = await fetch(`${BASE}/api/reports/rpt_1234567890/flag`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason: 'spam' }),
+  });
+  assert.equal(res.status, 503);
+});
+
+test('review queue requires admin auth (401 without a key)', async () => {
+  await ready;
+  process.env.ADMIN_API_KEY = MOD_ADMIN_KEY;
+  const res = await fetch(`${BASE}/api/moderation/reports`);
+  assert.equal(res.status, 401);
+});
+
+test('review queue rejects an invalid status filter (400)', async () => {
+  await ready;
+  process.env.ADMIN_API_KEY = MOD_ADMIN_KEY;
+  const res = await fetch(`${BASE}/api/moderation/reports?status=bananas`, {
+    headers: { 'X-Admin-Key': MOD_ADMIN_KEY },
+  });
+  assert.equal(res.status, 400);
+  assert.match((await res.json()).errors[0].message, /status must be one of/);
+});
+
+test('review queue is fail-closed (503) without a database', async () => {
+  await ready;
+  process.env.ADMIN_API_KEY = MOD_ADMIN_KEY;
+  const res = await fetch(`${BASE}/api/moderation/reports?status=flagged`, {
+    headers: { 'X-Admin-Key': MOD_ADMIN_KEY },
+  });
+  assert.equal(res.status, 503);
+});
+
+test('hide/clear actions require admin auth (401 without a key)', async () => {
+  await ready;
+  process.env.ADMIN_API_KEY = MOD_ADMIN_KEY;
+  for (const action of ['hide', 'clear']) {
+    const res = await fetch(`${BASE}/api/moderation/reports/rpt_1234567890/${action}`, { method: 'POST' });
+    assert.equal(res.status, 401, `${action} without key`);
+  }
+});
+
+test('hide/clear actions reject an invalid report id (400)', async () => {
+  await ready;
+  process.env.ADMIN_API_KEY = MOD_ADMIN_KEY;
+  for (const action of ['hide', 'clear']) {
+    const res = await fetch(`${BASE}/api/moderation/reports/bad%20id%21/${action}`, {
+      method: 'POST', headers: { 'X-Admin-Key': MOD_ADMIN_KEY },
+    });
+    assert.equal(res.status, 400, `${action} invalid id`);
+  }
+});
+
+// --- Report rate limiting: 30s per identity, Retry-After surfaced --------------
+// The trust surface relies on this window; it had zero coverage until now.
+
+const postWaitTime = (identity, minutes = 11) =>
+  fetch(`${BASE}/api/wait-times`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-User-Id': identity },
+    body: JSON.stringify({ airport: 'JFK', checkpoint: 'Main', waitMinutes: minutes }),
+  });
+
+test('rate limiter: second report within 30s from the same identity answers 429 with Retry-After', async () => {
+  await ready;
+  const first = await postWaitTime('ratelimit-flow-a');
+  assert.equal(first.status, 201);
+  const second = await postWaitTime('ratelimit-flow-a');
+  assert.equal(second.status, 429);
+  const retryAfter = second.headers.get('Retry-After');
+  assert.ok(retryAfter !== null, '429 without Retry-After breaks the client countdown');
+  const seconds = parseInt(retryAfter, 10);
+  assert.ok(seconds >= 1 && seconds <= 30, `Retry-After ${seconds} within the 30s window`);
+  const body = await second.json();
+  assert.ok(Array.isArray(body.errors) && body.errors.some((e) => e.field === 'rateLimit'));
+});
+
+test('rate limiter is per-identity, not global', async () => {
+  await ready;
+  const a = await postWaitTime('ratelimit-flow-b', 12);
+  assert.equal(a.status, 201);
+  const b = await postWaitTime('ratelimit-flow-c', 13);
+  assert.equal(b.status, 201, 'a different identity must not inherit the throttle');
+});
+
+test('rate limiter buckets identities independently: aliased report body fields work too', async () => {
+  await ready;
+  const alias = await fetch(`${BASE}/api/wait-times`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-User-Id': 'ratelimit-flow-d' },
+    body: JSON.stringify({ airport: 'jfk', waitTimeMinutes: 9, timestamp: new Date().toISOString() }),
+  });
+  assert.equal(alias.status, 201, 'waitTimeMinutes alias + lowercase airport accepted');
+  const aliasBody = await alias.json();
+  assert.equal(aliasBody.airport, 'JFK', 'canonical uppercase code echoed');
+  const second = await postWaitTime('ratelimit-flow-d');
+  assert.equal(second.status, 429, 'identity throttle applies across write paths');
 });

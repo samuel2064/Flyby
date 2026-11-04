@@ -1,15 +1,26 @@
-import { useState } from 'react'
-import { DEFAULT_AIRPORT, type Airport } from './data/airports'
+import { useMemo, useState } from 'react'
+import { DEFAULT_AIRPORT, checkpointOptions, type Airport } from './data/airports'
 import { useWaitTimes, formatRelativeTime } from './hooks/useWaitTimes'
+import { useForecasts } from './hooks/useForecasts'
+import { buildBestByCheckpoint } from './lib/forecastChip'
+import { buildConsensusByCheckpoint } from './lib/crowdConsensus'
 import { AirportSearch } from './components/AirportSearch'
 import { CheckpointCard } from './components/CheckpointCard'
 import { ReportSheet } from './components/ReportSheet'
+import { InstallPrompt } from './components/InstallPrompt'
 import { SkeletonCard } from './components/SkeletonCard'
+import { Dashboard } from './components/Dashboard'
+import { AirportDetail } from './components/AirportDetail'
+import type { AirportSummary } from './api/summary'
+
+// Tabs (TIR-317): dashboard is the default landing view; the original
+// search-and-report flow lives under its own tab, untouched.
+type Tab = 'dashboard' | 'search'
 
 export default function App() {
-  const [airport, setAirport] = useState<Airport>(DEFAULT_AIRPORT)
-  const [reportCheckpoint, setReportCheckpoint] = useState<string | null>(null)
-  const { waitTimes, state, lastUpdated, live, refresh } = useWaitTimes(airport.code)
+  const [tab, setTab] = useState<Tab>('dashboard')
+  // Summary row once a dashboard card is drilled into; null = overview.
+  const [detailAirport, setDetailAirport] = useState<AirportSummary | null>(null)
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -21,21 +32,69 @@ export default function App() {
             </svg>
             <span className="text-lg font-bold tracking-tight">Flyby</span>
           </div>
-          <span
-            aria-live="polite"
-            className="inline-flex items-center gap-1.5 rounded-full bg-white/10 px-2.5 py-1 text-xs font-semibold"
-          >
-            <span
-              aria-hidden="true"
-              className={`h-2 w-2 rounded-full ${live ? 'bg-emerald-400' : 'bg-slate-400'}`}
-            />
-            {live ? 'Live' : 'Polling'}
-          </span>
+          <nav aria-label="Views" className="flex gap-1 rounded-full bg-white/10 p-1">
+            {(
+              [
+                ['dashboard', 'Dashboard'],
+                ['search', 'Search & Report'],
+              ] as const
+            ).map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                aria-pressed={tab === value}
+                onClick={() => setTab(value)}
+                className={`min-h-11 rounded-full px-3 text-xs font-semibold transition focus:outline-none focus:ring-2 focus:ring-white/40 sm:min-h-0 sm:px-4 ${
+                  tab === value ? 'bg-white text-brand-900' : 'text-white/80 hover:text-white'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </nav>
         </div>
       </header>
 
       <main className="mx-auto max-w-3xl px-4 pb-16 sm:px-6">
-        <section className="pt-8">
+        {tab === 'dashboard' ? (
+          detailAirport ? (
+            <AirportDetail summary={detailAirport} onBack={() => setDetailAirport(null)} />
+          ) : (
+            <Dashboard onSelectAirport={setDetailAirport} />
+          )
+        ) : (
+          <SearchReportView />
+        )}
+
+        <p className="mt-10 text-center text-xs text-slate-500">
+          Flyby — crowdsourced airport security wait times
+        </p>
+      </main>
+
+      <InstallPrompt />
+    </div>
+  )
+}
+
+function SearchReportView() {
+  const [airport, setAirport] = useState<Airport>(DEFAULT_AIRPORT)
+  // undefined = closed, null = picker mode (traveler picks the checkpoint),
+  // string = fixed checkpoint from a card.
+  const [reportTarget, setReportTarget] = useState<string | null | undefined>(undefined)
+  const { waitTimes, state, lastUpdated, live, refresh } = useWaitTimes(airport.code)
+  const { forecasts, loading: forecastsLoading } = useForecasts(airport.code, lastUpdated)
+  const bestByCheckpoint = useMemo(
+    () => buildBestByCheckpoint(forecasts),
+    [forecasts],
+  )
+  const consensusByCheckpoint = useMemo(
+    () => buildConsensusByCheckpoint(forecasts),
+    [forecasts],
+  )
+
+  return (
+    <>
+      <section className="pt-8">
           <h1 className="text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">
             Security wait times, live
           </h1>
@@ -52,6 +111,15 @@ export default function App() {
             <h2 className="text-lg font-semibold text-slate-900">
               {airport.code} · {airport.city}
             </h2>
+            <span
+              className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600"
+            >
+              <span
+                aria-hidden="true"
+                className={`h-2 w-2 rounded-full ${live ? 'bg-emerald-400' : 'bg-slate-400'}`}
+              />
+              {live ? 'Live' : 'Polling'}
+            </span>
             <p className="text-xs text-slate-500">
               Updated {formatRelativeTime(lastUpdated)}
               {lastUpdated && (
@@ -60,12 +128,21 @@ export default function App() {
                   <button
                     type="button"
                     onClick={refresh}
-                    className="font-semibold text-brand-700 hover:underline focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+                    className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center py-3 px-4 align-middle font-semibold text-brand-700 hover:underline focus:outline-none focus:ring-2 focus:ring-brand-500/40"
                   >
                     Refresh
                   </button>
+                  {' · '}
                 </>
               )}
+              <button
+                type="button"
+                data-testid="report-button"
+                onClick={() => setReportTarget(null)}
+                className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center py-3 px-4 align-middle font-semibold text-brand-700 hover:underline focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+              >
+                Report a wait time
+              </button>
             </p>
           </div>
 
@@ -95,10 +172,17 @@ export default function App() {
             )}
             {state === 'ready' &&
               waitTimes.map((waitTime) => (
+                // Key stability: one row per checkpoint client-side
+                // (latestPerCheckpoint). updatedAt used to live in the key,
+                // which unmounted+remounted every card - and its history
+                // chart animation - on every SSE tick.
                 <CheckpointCard
-                  key={`${waitTime.checkpoint}-${waitTime.updatedAt}`}
+                  key={waitTime.checkpoint.toLowerCase()}
                   waitTime={waitTime}
-                  onReport={setReportCheckpoint}
+                  onReport={setReportTarget}
+                  best={bestByCheckpoint.bestFor(waitTime.checkpoint)}
+                  bestLoading={forecastsLoading}
+                  consensus={consensusByCheckpoint.consensusFor(waitTime.checkpoint)}
                 />
               ))}
             {state === 'ready' && waitTimes.length === 0 && (
@@ -106,24 +190,52 @@ export default function App() {
                 <p className="text-sm font-semibold text-slate-900">
                   No checkpoints reported at {airport.code} yet.
                 </p>
+                <CheckpointList airportCode={airport.code} />
                 <p className="mt-1 text-xs text-slate-500">Be the first to report a wait time.</p>
+                <button
+                  type="button"
+                  data-testid="empty-report-button"
+                  onClick={() => setReportTarget(null)}
+                  className="mt-4 inline-flex h-10 items-center justify-center rounded-xl bg-brand-500 px-4 text-sm font-semibold text-white transition hover:bg-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+                >
+                  Report a wait time
+                </button>
               </div>
             )}
           </div>
         </section>
 
-        <p className="mt-10 text-center text-xs text-slate-500">
-          Flyby · crowdsourced airport security wait times
-        </p>
-      </main>
-
       <ReportSheet
-        open={reportCheckpoint !== null}
+        open={reportTarget !== undefined}
         airportCode={airport.code}
-        checkpoint={reportCheckpoint ?? ''}
-        onClose={() => setReportCheckpoint(null)}
+        checkpoint={reportTarget ?? undefined}
+        onClose={() => setReportTarget(undefined)}
         onReported={refresh}
       />
-    </div>
+    </>
+  )
+}
+
+// Empty-state context: an airport with zero reports is the funnel start, not
+// a dead end - show its real checkpoint list (shared data file, no API call)
+// so a traveler can match what the sign over their queue says.
+function CheckpointList({ airportCode }: { airportCode: string }) {
+  const names = checkpointOptions(airportCode)
+  if (names.length === 0) return null
+  return (
+    <ul
+      data-testid="known-checkpoints"
+      className="mt-3 flex flex-wrap justify-center gap-1.5"
+      aria-label={`Checkpoints at ${airportCode}`}
+    >
+      {names.map((name) => (
+        <li
+          key={name}
+          className="rounded-full bg-slate-100 px-2.5 py-1 text-xs text-slate-600"
+        >
+          {name}
+        </li>
+      ))}
+    </ul>
   )
 }

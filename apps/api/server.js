@@ -1,5 +1,10 @@
+// TIR-346 no-op redeploy marker: forces a fresh Render build of the API
+// service to rule out a wedged deploy during the 2026-10 outage triage.
 const express = require('express');
 const crypto = require('crypto');
+// Single source of truth for airport + checkpoint data, shared with apps/web
+// (imported at build time) so the API and the web mirror can never drift.
+const FLYBY_DATA = require('../../data/airports.json');
 const app = express();
 const port = process.env.PORT || 3000;
 
@@ -67,8 +72,21 @@ const VAPID_PUBLIC_KEY =
   'BMqC9TckHTr2DdYFqviDHxDoQZFKQz0zTbvk1KwUqJvXcbYQzPxmZbQ0c9kYvA1p1w0fKk1w2yQ0pXy9m5Qq0R8';
 
 // --- SSE live updates -------------------------------------------------------
+// TIR-314: the stream carries only REAL wait-time updates. When a report is
+// accepted (POST /api/wait-times), it fans out to the SSE clients subscribed
+// to that airport (and to clients without an airport filter). Nothing is
+// synthesized anymore: a quiet stream stays quiet, so a client watching a
+// report-less airport sees the honest empty state instead of fake numbers
+// (same trust principle as the TIR-298 GET fix). A keepalive comment frame
+// (": ping") keeps proxy connections from idling out without emitting data.
 
-const sseClients = new Set();
+const sseClients = new Map(); // response -> subscribed airport code (or null)
+const SSE_KEEPALIVE_MS =
+  Number(process.env.SSE_KEEPALIVE_MS) > 0 ? Number(process.env.SSE_KEEPALIVE_MS) : 20000;
+
+function sseWrite(res, payload) {
+  res.write(`data: ${JSON.stringify(payload)}\n\n`);
+}
 
 function sseHandler(req, res) {
   res.writeHead(200, {
@@ -78,26 +96,43 @@ function sseHandler(req, res) {
     'Access-Control-Allow-Origin': '*',
   });
   res.write('retry: 3000\n\n');
-  res.write(`data: ${JSON.stringify({ type: 'connected', timestamp: new Date().toISOString() })}\n\n`);
+  sseWrite(res, { type: 'connected', timestamp: new Date().toISOString() });
 
-  const interval = setInterval(() => {
-    res.write(
-      `data: ${JSON.stringify({
-        type: 'wait-time-update',
-        airport: req.query.airport || 'SEA',
-        checkpoint: 'Main',
-        waitMinutes: Math.floor(Math.random() * 20) + 5,
-        timestamp: new Date().toISOString(),
-      })}\n\n`
-    );
-  }, 2000);
+  const subscribedAirport = req.query.airport
+    ? String(req.query.airport).trim().toUpperCase()
+    : null;
+  // SSE comment frames are invisible to EventSource but keep the connection
+  // open through proxies (Render idles out quiet connections).
+  const keepalive = setInterval(() => {
+    res.write(': ping\n\n');
+  }, SSE_KEEPALIVE_MS);
 
-  sseClients.add(res);
+  sseClients.set(res, subscribedAirport);
   req.on('close', () => {
-    clearInterval(interval);
+    clearInterval(keepalive);
     sseClients.delete(res);
     res.end();
   });
+}
+
+// Fan an accepted report out to matching SSE clients. Never throws: a dead
+// socket must not break the 201 report response.
+function broadcastWaitTime({ id, airport, checkpoint, waitMinutes, reportedAt }) {
+  for (const [client, subscribedAirport] of sseClients) {
+    if (subscribedAirport && airport && subscribedAirport !== airport) continue;
+    try {
+      sseWrite(client, {
+        type: 'wait-time-update',
+        id,
+        airport,
+        checkpoint,
+        waitMinutes,
+        timestamp: reportedAt,
+      });
+    } catch (err) {
+      sseClients.delete(client);
+    }
+  }
 }
 
 app.get('/api/events', sseHandler);
@@ -121,7 +156,10 @@ app.get('/api/wait-times', async (req, res) => {
   }
   try {
     if (db) {
-      const where = rawAirport ? { airport } : {};
+      // Moderation (TIR-325): moderator-hidden reports leave every public surface.
+      const where = rawAirport
+        ? { airport, moderationStatus: { not: 'hidden' } }
+        : { moderationStatus: { not: 'hidden' } };
       const rows = await db.waitTimeReport.findMany({
         where,
         orderBy: { createdAt: 'desc' },
@@ -129,6 +167,9 @@ app.get('/api/wait-times', async (req, res) => {
       });
       return res.json(
         rows.map((r) => ({
+          // Opaque report id (rpt_*) exposed so clients can target
+          // /api/reports/:id/flag (TIR-332). Not a userId - TIR-309 safe.
+          id: r.id,
           airport: r.airport,
           checkpoint: r.checkpoint,
           waitMinutes: r.waitMinutes,
@@ -152,6 +193,7 @@ function reportLimitKey(req, body) {
   return `ip:${req.ip || 'unknown'}`;
 }
 
+const MAX_WAIT_MINUTES = 300;
 const reportHandler = async (req, res) => {
   const body = req.body || {};
   const waitMinutesValue =
@@ -172,7 +214,24 @@ const reportHandler = async (req, res) => {
   ) {
     errors.push({ field: 'waitMinutes', message: 'waitMinutes must be a positive integer' });
   }
+  if (Number.isInteger(waitMinutesValue) && waitMinutesValue > MAX_WAIT_MINUTES) {
+    errors.push({
+      field: 'waitMinutes',
+      message: `waitMinutes must be between 1 and ${MAX_WAIT_MINUTES}`,
+    });
+  }
   if (errors.length) return res.status(400).json({ errors });
+
+  // Boundary validation (TIR-314): only reports for canonical airports are
+  // accepted. Previously unknown-airport reports (QALOCAL, "123", ...) were
+  // persisted and had to be purged at boot (TIR-294); now they are rejected
+  // at the edge and never written. The code is stored uppercase so GET
+  // filters and the residue purge both see a single canonical form.
+  const airportCode = body.airport.trim().toUpperCase();
+  if (!AIRPORTS.some((a) => a.code === airportCode)) {
+    return res.status(404).json({ error: 'Airport not found' });
+  }
+  const checkpointName = String(body.checkpoint || 'Main');
 
   const limitKey = reportLimitKey(req, body);
   const now = Date.now();
@@ -197,8 +256,8 @@ const reportHandler = async (req, res) => {
       await db.waitTimeReport.create({
         data: {
           id,
-          airport: body.airport.trim(),
-          checkpoint: String(body.checkpoint || 'Main'),
+          airport: airportCode,
+          checkpoint: checkpointName,
           waitMinutes: waitMinutesValue,
           reporter: body.reporter || body.userId || null,
         },
@@ -208,7 +267,23 @@ const reportHandler = async (req, res) => {
     console.warn(`POST /api/wait-times/report DB fallback: ${err.message}`);
   }
   reportRateLimits.set(limitKey, Date.now());
-  res.status(201).json({ id, ...body, waitMinutes: waitMinutesValue, receivedAt });
+  // Real-time fan-out (TIR-314): every accepted report is pushed to the SSE
+  // clients watching this airport. Only real reports flow - never fabricated
+  // values.
+  broadcastWaitTime({
+    id,
+    airport: airportCode,
+    checkpoint: checkpointName,
+    waitMinutes: waitMinutesValue,
+    reportedAt: receivedAt,
+  });
+  res.status(201).json({
+    id,
+    airport: airportCode,
+    checkpoint: checkpointName,
+    waitMinutes: waitMinutesValue,
+    receivedAt,
+  });
 };
 
 // Report submission: canonical path is POST /api/wait-times; /report is kept
@@ -311,6 +386,223 @@ app.delete('/api/reports/:id', async (req, res) => {
   }
 });
 
+// --- Moderation: abuse flags + review queue (TIR-325) ------------------------
+// Durable moderation state on WaitTimeReport (flaggedAt / flagReason /
+// moderationStatus: none | flagged | hidden). Powers the TIR-319 flag flow
+// and its review queue.
+//
+// Public surface rule (TIR-309 redaction discipline, extended): hidden
+// reports are excluded from every public read (wait-times list, wait-stats,
+// summary). Flagged-but-unactioned reports still count until a moderator
+// hides them - flagging is a signal, not an instant removal.
+//
+// Redaction: moderation responses never carry the reporter/userId - the
+// review queue shows the flagged content, not the submitter.
+
+// Admin guard shared by the review queue and the hide/clear actions. Same
+// contract as DELETE /api/reports: fail-closed when ADMIN_API_KEY is unset,
+// constant-time comparison, 503/401 responses.
+function requireAdmin(req, res) {
+  const adminKey = configuredAdminKey();
+  if (!adminKey) {
+    res.status(503).json({ error: 'Moderation is disabled: ADMIN_API_KEY is not configured' });
+    return false;
+  }
+  const providedKey = extractAdminKey(req);
+  if (!providedKey || !adminKeyMatches(providedKey, adminKey)) {
+    res.status(401).json({ error: 'Invalid or missing admin key' });
+    return false;
+  }
+  return true;
+}
+
+// A hidden/cleared report may live in the stats/summary caches for a stale
+// window; drop them so moderation takes effect immediately.
+const waitStatsInvalidators = []; // registered by the stats/summary sections
+function invalidateAggregates() {
+  for (const invalidate of waitStatsInvalidators) invalidate();
+}
+
+// Redacted moderation view of a report row: no reporter, no userIds.
+function moderationView(r) {
+  return {
+    id: r.id,
+    airport: r.airport,
+    checkpoint: r.checkpoint,
+    waitMinutes: r.waitMinutes,
+    reportedAt: r.createdAt instanceof Date ? r.createdAt.toISOString() : r.createdAt,
+    flaggedAt: r.flaggedAt instanceof Date ? r.flaggedAt.toISOString() : r.flaggedAt,
+    flagReason: r.flagReason,
+    moderationStatus: r.moderationStatus,
+    // Distinct-session trust count (TIR-337); present when the query included _count.
+    ...(r._count ? { flagCount: r._count.flags } : {}),
+  };
+}
+
+const MODERATION_STATUSES = ['flagged', 'hidden', 'none'];
+const MAX_FLAG_REASON_LENGTH = 280;
+
+// POST /api/reports/:id/flag - public crowdsourced abuse flag (TIR-319 UI).
+// Body: { reason?: string, sessionId?: string }. Trust exclusion (TIR-324 /
+// TIR-337): flags are deduplicated per (reportId, sessionId); once
+// FLAG_HIDE_THRESHOLD DISTINCT sessions flag a report it leaves every public
+// surface (wait-times, wait-stats, summary) as moderationStatus 'hidden',
+// subject to moderator clear. Requests without a sessionId still mark the
+// report flagged for review but cannot trip the threshold (no dedupe key).
+// Public responses stay redacted: only id/status/flagCount, never content.
+const FLAG_HIDE_THRESHOLD = 3;
+const MAX_FLAG_SESSION_LENGTH = 128;
+app.post('/api/reports/:id/flag', async (req, res) => {
+  const id = req.params.id;
+  if (typeof id !== 'string' || !REPORT_ID_PATTERN.test(id)) {
+    return res.status(400).json({ error: 'Invalid report id' });
+  }
+  let reason = null;
+  if (req.body && req.body.reason !== undefined) {
+    if (typeof req.body.reason !== 'string' || req.body.reason.trim() === '') {
+      return res.status(400).json({ errors: [{ field: 'reason', message: 'reason must be a non-empty string' }] });
+    }
+    reason = req.body.reason.trim().slice(0, MAX_FLAG_REASON_LENGTH);
+  }
+  let sessionId = null;
+  if (req.body && req.body.sessionId !== undefined) {
+    if (typeof req.body.sessionId !== 'string' || req.body.sessionId.trim() === '') {
+      return res.status(400).json({ errors: [{ field: 'sessionId', message: 'sessionId must be a non-empty string' }] });
+    }
+    sessionId = req.body.sessionId.trim().slice(0, MAX_FLAG_SESSION_LENGTH);
+  }
+  // No persistence, no durable flag: moderation requires the DB.
+  if (!db) {
+    return res.status(503).json({ error: 'Moderation is disabled: database unavailable' });
+  }
+  try {
+    const { updated, flagCount, becameHidden } = await db.$transaction(async (tx) => {
+      const existing = await tx.waitTimeReport.findUnique({ where: { id } });
+      if (!existing) return { updated: null, flagCount: 0, becameHidden: false };
+      if (sessionId) {
+        // UNIQUE(reportId, sessionId): same session re-flagging updates the
+        // reason but never inflates the trust count.
+        await tx.reportFlag.upsert({
+          where: { reportId_sessionId: { reportId: id, sessionId } },
+          create: { reportId: id, sessionId, reason },
+          update: reason ? { reason } : {},
+        });
+      }
+      const flagCount = await tx.reportFlag.count({ where: { reportId: id } });
+      const wasHidden = existing.moderationStatus === 'hidden';
+      const updated = await tx.waitTimeReport.update({
+        where: { id },
+        data: {
+          flaggedAt: existing.flaggedAt || new Date(),
+          flagReason: reason || existing.flagReason,
+          // Hidden stays hidden; otherwise hide at the trust threshold.
+          moderationStatus: wasHidden || flagCount >= FLAG_HIDE_THRESHOLD ? 'hidden' : 'flagged',
+        },
+      });
+      return { updated, flagCount, becameHidden: !wasHidden && updated.moderationStatus === 'hidden' };
+    });
+    if (!updated) {
+      return res.status(404).json({ error: 'Report not found' });
+    }
+    // Threshold crossing changes public surfaces immediately (5-min caches).
+    if (becameHidden) invalidateAggregates();
+    console.info(JSON.stringify({
+      event: 'report_flagged', timestamp: new Date().toISOString(),
+      reportId: id, airport: updated.airport, checkpoint: updated.checkpoint, flagCount,
+    }));
+    return res.status(201).json({ id: updated.id, flaggedAt: updated.flaggedAt.toISOString(), moderationStatus: updated.moderationStatus, flagCount });
+  } catch (err) {
+    console.error(`POST /api/reports/${id}/flag error: ${err.message}`);
+    return res.status(500).json({ error: 'Database unavailable' });
+  }
+});
+
+// GET /api/moderation/reports?status=flagged|hidden|none - review queue.
+// Admin-only: a public queue would expose flagged content (and reward abuse).
+app.get('/api/moderation/reports', async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const status = req.query.status || 'flagged';
+  if (!MODERATION_STATUSES.includes(status)) {
+    return res.status(400).json({ errors: [{ field: 'status', message: `status must be one of: ${MODERATION_STATUSES.join(', ')}` }] });
+  }
+  if (!db) {
+    return res.status(503).json({ error: 'Moderation is disabled: database unavailable' });
+  }
+  try {
+    const rows = await db.waitTimeReport.findMany({
+      where: { moderationStatus: status },
+      orderBy: { flaggedAt: 'desc' },
+      take: 500,
+      include: { _count: { select: { flags: true } } },
+    });
+    return res.json(rows.map(moderationView));
+  } catch (err) {
+    console.error(`GET /api/moderation/reports error: ${err.message}`);
+    return res.status(500).json({ error: 'Database unavailable' });
+  }
+});
+
+// POST /api/moderation/reports/:id/hide - moderator removes a report from all
+// public surfaces (kept in the DB for audit/clear). Admin-only.
+// POST /api/moderation/reports/:id/clear - moderator clears the flag: back to
+// 'none', flag fields reset, report visible again if it was hidden.
+function moderationAction(newStatus, res, id) {
+  return async () => {
+    if (!db) {
+      res.status(503).json({ error: 'Moderation is disabled: database unavailable' });
+      return;
+    }
+    try {
+      const existing = await db.waitTimeReport.findUnique({ where: { id } });
+      if (!existing) {
+        res.status(404).json({ error: 'Report not found' });
+        return;
+      }
+      const data =
+        newStatus === 'hidden'
+          ? { moderationStatus: 'hidden' } // keep flag record for audit
+          : { moderationStatus: 'none', flaggedAt: null, flagReason: null };
+      const updated = await db.$transaction(async (tx) => {
+        const row = await tx.waitTimeReport.update({ where: { id }, data });
+        // Clearing a flag also resets the trust counter (TIR-337): remove all
+        // session flags so the report starts clean.
+        if (newStatus === 'none') {
+          await tx.reportFlag.deleteMany({ where: { reportId: id } });
+        }
+        return row;
+      });
+      invalidateAggregates();
+      console.info(JSON.stringify({
+        event: newStatus === 'hidden' ? 'report_hidden' : 'report_cleared',
+        timestamp: new Date().toISOString(), reportId: id,
+        airport: existing.airport, checkpoint: existing.checkpoint,
+      }));
+      res.json(moderationView(updated));
+    } catch (err) {
+      console.error(`moderation ${newStatus} /api/moderation/reports/${id} error: ${err.message}`);
+      res.status(500).json({ error: 'Database unavailable' });
+    }
+  };
+}
+
+app.post('/api/moderation/reports/:id/hide', async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const id = req.params.id;
+  if (typeof id !== 'string' || !REPORT_ID_PATTERN.test(id)) {
+    return res.status(400).json({ error: 'Invalid report id' });
+  }
+  await moderationAction('hidden', res, id)();
+});
+
+app.post('/api/moderation/reports/:id/clear', async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const id = req.params.id;
+  if (typeof id !== 'string' || !REPORT_ID_PATTERN.test(id)) {
+    return res.status(400).json({ error: 'Invalid report id' });
+  }
+  await moderationAction('none', res, id)();
+});
+
 
 // --- VAPID / push notifications --------------------------------------------
 
@@ -322,9 +614,9 @@ app.get('/api/push/vapidPublicKey', vapidHandler);
 app.get('/api/vapid-public-key', vapidHandler);
 
 // Subscribe (QA spec: FLAT response, idempotent per endpoint+airportId, validation)
-const AIRPORT_CODES = {
-  'apt-jfk': 'JFK', 'apt-sea': 'SEA', 'apt-lax': 'LAX', 'apt-ord': 'ORD', 'apt-sfo': 'SFO',
-};
+// TIR-313: derived from the shared data so every supported airport's apt-id
+// resolves (wait-times ?airportId= and subscriptions alike).
+const AIRPORT_CODES = Object.fromEntries(FLYBY_DATA.airports.map((a) => [a.id, a.code]));
 const MAX_SUBS_PER_USER = 10;
 const UNKNOWN_USERS = new Set(['user-unknown']);
 
@@ -339,7 +631,9 @@ function isValidUrl(s) {
   try { const u = new URL(s); return u.protocol === 'https:' || u.protocol === 'http:'; } catch { return false; }
 }
 
-// FLAT response contract: no secrets, ISO timestamps.
+// FLAT response contract (TIR-294/TIR-309): subscribe ECHO responses only.
+// The caller just supplied these values on subscribe, so echoing them back is
+// not a disclosure; push keys p256dh/auth are never echoed anywhere.
 function flatSubscription(record) {
   return {
     id: record.id,
@@ -347,6 +641,21 @@ function flatSubscription(record) {
     airportId: record.airportId,
     airportCode: record.airportCode,
     userId: record.userId,
+    createdAt: record.createdAt instanceof Date ? record.createdAt.toISOString() : record.createdAt,
+    updatedAt: record.updatedAt instanceof Date ? record.updatedAt.toISOString() : record.updatedAt,
+  };
+}
+
+// TIR-309: PUBLIC LIST responses (GET /api/subscriptions and aliases,
+// GET /api/notifications/:userId) must not expose raw endpoints or userIds -
+// an FCM endpoint is a bearer credential and userId is correlatable PII.
+// Lists return only non-identifying metadata; the QA fixture (sub-001) stays
+// discoverable by id/airport.
+function redactedSubscription(record) {
+  return {
+    id: record.id,
+    airportId: record.airportId,
+    airportCode: record.airportCode,
     createdAt: record.createdAt instanceof Date ? record.createdAt.toISOString() : record.createdAt,
     updatedAt: record.updatedAt instanceof Date ? record.updatedAt.toISOString() : record.updatedAt,
   };
@@ -422,8 +731,7 @@ const subscribeHandler = async (req, res) => {
   if (record) {
     Object.assign(record, { p256dh, auth, userId: effectiveUserId });
     record.updatedAt = new Date().toISOString();
-    const { p256dh: _k1, auth: _k2, ...flat } = record;
-    return res.status(200).json(flat);
+    return res.status(200).json(flatSubscription(record));
   }
 
   const userCount = Array.from(subscriptions.values()).filter((s) => s.userId === effectiveUserId).length;
@@ -443,8 +751,7 @@ const subscribeHandler = async (req, res) => {
     updatedAt: new Date().toISOString(),
   };
   subscriptions.set(record.id, record);
-  const { p256dh: _k1, auth: _k2, ...flat } = record;
-  res.status(201).json(flat);
+  return res.status(201).json(flatSubscription(record));
 };
 
 // Seed record used by the QA contract (delete-403 and trigger happy paths).
@@ -500,13 +807,13 @@ const listHandler = async (req, res) => {
       const rows = await db.notificationSubscription.findMany({
         orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
       });
-      return res.json({ subscriptions: rows.map(flatSubscription) });
+      return res.json({ subscriptions: rows.map(redactedSubscription) });
     } catch (err) {
       console.warn(`list DB fallback: ${err.message}`);
     }
   }
   res.json({
-    subscriptions: Array.from(subscriptions.values()).map(({ p256dh, auth, ...flat }) => flat),
+    subscriptions: Array.from(subscriptions.values()).map(redactedSubscription),
   });
 };
 app.get('/api/notifications/subscriptions', listHandler);
@@ -544,15 +851,13 @@ const deleteByIdHandler = async (req, res) => {
 };
 app.delete('/api/notifications/:id', deleteByIdHandler);
 
-// Delete subscription (alias paths)
-const deleteHandler = (req, res) => {
-  const id = req.params.id;
-  subscriptions.delete(id);
-  res.json({ success: true, id });
-};
-app.delete('/api/notifications/subscriptions/:id', deleteHandler);
-app.delete('/api/push/subscriptions/:id', deleteHandler);
-app.delete('/api/subscriptions/:id', deleteHandler);
+// Delete subscription (alias paths) - all deletion routes flow through the
+// canonical guarded handler: the mock handler that used to live here claimed
+// {success:true} for anything, never deleted the persisted record (pushes kept
+// firing for 'deleted' subs), and skipped the ownership check entirely.
+app.delete('/api/notifications/subscriptions/:id', deleteByIdHandler);
+app.delete('/api/push/subscriptions/:id', deleteByIdHandler);
+app.delete('/api/subscriptions/:id', deleteByIdHandler);
 
 // Preferences (get + update) - process-local, not persistence-critical
 const prefs = { enabled: true, airports: [], minWaitChange: 5 };
@@ -687,7 +992,7 @@ app.get('/api/notifications/:userId', async (req, res) => {
         skip: start,
         take: pageSize,
       });
-      return res.json({ subscriptions: rows.map(flatSubscription), total, page, pageSize });
+      return res.json({ subscriptions: rows.map(redactedSubscription), total, page, pageSize });
     } catch (err) {
       console.warn(`user list DB fallback: ${err.message}`);
     }
@@ -695,7 +1000,7 @@ app.get('/api/notifications/:userId', async (req, res) => {
   const userSub = Array.from(subscriptions.values()).filter((s) => s.userId === req.params.userId);
   const items = userSub
     .slice(start, start + pageSize)
-    .map(({ p256dh, auth, ...flat }) => flat);
+    .map(redactedSubscription);
   res.json({ subscriptions: items, total: userSub.length, page, pageSize });
 });
 
@@ -734,7 +1039,7 @@ const triggerHandler = (req, res) => {
     subscriptionId,
     timestamp: new Date().toISOString(),
   };
-  for (const client of sseClients) {
+  for (const client of sseClients.keys()) {
     client.write(`data: ${JSON.stringify(payload)}\n\n`);
   }
   res.status(200).json({ sent: true, messageId, payload, deliveredTo: sseClients.size });
@@ -743,25 +1048,16 @@ app.post('/api/notifications/trigger', triggerHandler);
 app.post('/api/push/trigger', triggerHandler);
 app.post('/api/notifications/test', triggerHandler);
 
-// --- Airports + checkpoints reference data (TIR-287) ------------------------
-// Canonical list mirrors apps/web/src/data/airports.ts so the API and web
-// frontend describe the same supported airports.
+// --- Airports + checkpoints reference data (TIR-287, TIR-313) -----------------
+// 51 airports / 164 checkpoints ported from the monorepo's canonical data.
+// Source of truth: ../../data/airports.json (shared with apps/web so the API
+// and the web frontend describe the same supported airports - single file,
+// no hand-synced mirror to drift). The five airports that launched the live
+// app (JFK, SEA, LAX, ORD, SFO) keep their original 'Main' checkpoint first
+// so existing production reports and forecast ids stay valid.
 
-const AIRPORTS = [
-  { id: 'apt-jfk', code: 'JFK', name: 'John F. Kennedy International', city: 'New York', timezone: 'America/New_York' },
-  { id: 'apt-sea', code: 'SEA', name: 'Seattle-Tacoma International', city: 'Seattle', timezone: 'America/Los_Angeles' },
-  { id: 'apt-lax', code: 'LAX', name: 'Los Angeles International', city: 'Los Angeles', timezone: 'America/Los_Angeles' },
-  { id: 'apt-ord', code: 'ORD', name: "O'Hare International", city: 'Chicago', timezone: 'America/Chicago' },
-  { id: 'apt-sfo', code: 'SFO', name: 'San Francisco International', city: 'San Francisco', timezone: 'America/Los_Angeles' },
-];
-
-const CHECKPOINTS_BY_AIRPORT = {
-  JFK: ['Main'],
-  SEA: ['Main'],
-  LAX: ['Main'],
-  ORD: ['Main'],
-  SFO: ['Main'],
-};
+const AIRPORTS = FLYBY_DATA.airports;
+const CHECKPOINTS_BY_AIRPORT = FLYBY_DATA.checkpointsByAirport;
 
 // --- Production data hygiene (TIR-294) --------------------------------------
 // QA/test residue must never be visible in production: reports for airports
@@ -1101,6 +1397,95 @@ app.get('/api/checkpoints/:id/predict', async (req, res) => {
   });
 });
 
+// --- Checkpoint wait-time history (MVP feature #6) ---------------------------
+// GET /api/checkpoints/:id/history - real reported wait times bucketed into
+// fixed intervals over a rolling window. Powers the per-checkpoint historical
+// chart. Buckets are epoch-aligned multiples of bucketMinutes; each point is
+// the rounded average of the reports in that bucket. No fabrication: a
+// checkpoint without reports returns an empty history.
+
+const HISTORY_BUCKET_MINUTES = new Set([5, 10, 15, 30, 60]);
+
+// Pure core (exported for unit tests): bucket raw reports into epoch-aligned
+// intervals and average each bucket. Input order does not matter; output is
+// ascending by bucket start time. Reports without a parsable timestamp are
+// skipped instead of corrupting a bucket.
+function bucketWaitHistory(reports, bucketMinutes = 30) {
+  if (!HISTORY_BUCKET_MINUTES.has(bucketMinutes)) {
+    throw new Error(`Unsupported bucket size: ${bucketMinutes}`);
+  }
+  const bucketMs = bucketMinutes * 60 * 1000;
+  const byBucket = new Map();
+  for (const report of reports || []) {
+    const raw =
+      report.reportedAt instanceof Date ? report.reportedAt.getTime() : Date.parse(report.reportedAt);
+    if (!Number.isFinite(raw)) continue;
+    const start = Math.floor(raw / bucketMs) * bucketMs;
+    const entry = byBucket.get(start) || { total: 0, count: 0 };
+    entry.total += report.minutes;
+    entry.count += 1;
+    byBucket.set(start, entry);
+  }
+  return [...byBucket.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([start, entry]) => ({
+      time: new Date(start).toISOString(),
+      minutes: Math.round(entry.total / entry.count),
+      count: entry.count,
+    }));
+}
+
+app.get('/api/checkpoints/:id/history', async (req, res) => {
+  const id = req.params.id;
+  if (typeof id !== 'string' || !CHECKPOINT_ID_PATTERN.test(id)) {
+    return res.status(400).json({ error: 'Invalid checkpoint id' });
+  }
+  const windowResult = parseBoundedInt(req.query.window, 4, 1, 24, 'window');
+  if (!windowResult.valid) return res.status(400).json({ error: windowResult.error });
+  let bucketMinutes = 30;
+  if (req.query.bucket !== undefined) {
+    const bucketResult = parseBoundedInt(req.query.bucket, 30, 5, 60, 'bucket');
+    if (!bucketResult.valid) return res.status(400).json({ error: bucketResult.error });
+    if (!HISTORY_BUCKET_MINUTES.has(bucketResult.value)) {
+      return res.status(400).json({ error: 'bucket must be one of: 5, 10, 15, 30, 60' });
+    }
+    bucketMinutes = bucketResult.value;
+  }
+  const cp = findCheckpointById(id);
+  if (!cp) {
+    return res.status(404).json({ error: 'Checkpoint not found' });
+  }
+  const since = new Date(Date.now() - windowResult.value * 60 * 60 * 1000);
+  let reports = [];
+  if (db) {
+    try {
+      const rows = await db.waitTimeReport.findMany({
+        where: { airport: cp.airport.code, checkpoint: cp.name, createdAt: { gte: since } },
+        select: { waitMinutes: true, createdAt: true },
+        orderBy: { createdAt: 'asc' },
+      });
+      reports = rows.map((r) => ({ minutes: r.waitMinutes, reportedAt: r.createdAt }));
+    } catch (err) {
+      // Never serve a fabricated history on a DB error.
+      console.error(`history DB read failed: ${err.message}`);
+      return res.status(500).json({ error: 'Database unavailable' });
+    }
+  }
+  const history = bucketWaitHistory(reports, bucketMinutes);
+  return res.json({
+    data: {
+      checkpointId: id,
+      airportCode: cp.airport.code,
+      airportName: cp.airport.name,
+      name: cp.name,
+      windowHours: windowResult.value,
+      bucketMinutes,
+      reportCount: reports.length,
+      history,
+    },
+  });
+});
+
 // GET /api/airports/:code/forecasts - batch pattern forecast for every
 // checkpoint at an airport in ONE call (powers the Airport page best-time
 // chips without N predict round trips). Checkpoints with no reports return
@@ -1151,6 +1536,228 @@ app.get('/api/airports/:code/forecasts', async (req, res) => {
       forecasts,
     },
   });
+});
+
+// --- Per-airport wait-time statistics (TIR-321) -------------------------------
+// GET /api/airports/:id/wait-stats - read-only aggregate of crowd-sourced
+// wait-time reports for one airport: overall average + p50/p90 plus
+// hour-of-day and day-of-week breakdowns, bucketed in the airport's local
+// timezone. Powers the Phase 2 wait-time dashboard (TIR-317 frontend).
+//
+// Privacy/integrity invariants:
+//   - Stats are anonymous aggregates: the response carries no userIds, no
+//     raw report records, no endpoints (same redaction principle as TIR-309).
+//   - No fabrication: an airport with no reports returns sane empty buckets
+//     (sampleSize 0, null stats) instead of errors or invented numbers.
+//   - Moderation (TIR-325): moderator-hidden reports are excluded via the
+//     query's where clause; the reflect-moderation cache invalidation fires
+//     before TTL expiry, and flagged-but-unactioned reports still count until
+//     a moderator hides them.
+//
+// Compute-on-read with a short in-memory cache (5 min TTL, keyed by airport
+// code -> at most one entry per supported airport). No materialized tables.
+
+const WAIT_STATS_CACHE_TTL_MS = 5 * 60 * 1000;
+const waitStatsCache = new Map(); // airportCode -> { expiresAt, payload }
+// Moderation (TIR-325): hiding a report must reflect in stats immediately.
+waitStatsInvalidators.push(() => waitStatsCache.clear());
+
+// Nearest-rank percentile over a sorted array; null for empty input.
+function percentileOf(sorted, q) {
+  if (sorted.length === 0) return null;
+  const idx = Math.ceil((q / 100) * sorted.length) - 1;
+  return sorted[Math.min(sorted.length - 1, Math.max(0, idx))];
+}
+
+function bucketStats(minutes) {
+  if (minutes.length === 0) {
+    return { averageMinutes: null, p50Minutes: null, p90Minutes: null, sampleSize: 0 };
+  }
+  const sorted = [...minutes].sort((a, b) => a - b);
+  const average = Math.round((sorted.reduce((sum, m) => sum + m, 0) / sorted.length) * 10) / 10;
+  return {
+    averageMinutes: average,
+    p50Minutes: percentileOf(sorted, 50),
+    p90Minutes: percentileOf(sorted, 90),
+    sampleSize: minutes.length,
+  };
+}
+
+const DOW_INDEX = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+
+function localWeekdayFormatter(timezone) {
+  try {
+    return new Intl.DateTimeFormat('en-US', { timeZone: timezone || 'UTC', weekday: 'short' });
+  } catch {
+    return new Intl.DateTimeFormat('en-US', { weekday: 'short' });
+  }
+}
+
+// Pure aggregation core (exported for unit tests): reports are
+// { minutes, reportedAt } and are bucketed by the airport's local wall clock.
+// Buckets with no reports return null stats and sampleSize 0 - never errors.
+function computeWaitStats(timezone, reports) {
+  const tz = timezone || 'UTC';
+  const hourFmt = localHourFormatter(tz);
+  const weekdayFmt = localWeekdayFormatter(tz);
+  const byHour = Array.from({ length: 24 }, () => []);
+  const byDay = Array.from({ length: 7 }, () => []);
+  const all = [];
+  for (const report of reports || []) {
+    const at = report.reportedAt instanceof Date ? report.reportedAt : new Date(report.reportedAt);
+    if (!Number.isFinite(at.getTime())) continue;
+    all.push(report.minutes);
+    byHour[localHourOf(at, hourFmt)].push(report.minutes);
+    const dayIndex = DOW_INDEX[weekdayFmt.format(at)];
+    byDay[dayIndex === undefined ? at.getUTCDay() : dayIndex].push(report.minutes);
+  }
+  return {
+    timezone: tz,
+    sampleSize: all.length,
+    overall: bucketStats(all),
+    byHourOfDay: byHour.map((minutes, hour) => ({ hour, ...bucketStats(minutes) })),
+    byDayOfWeek: byDay.map((minutes, day) => ({ day, ...bucketStats(minutes) })),
+  };
+}
+
+app.get('/api/airports/:code/wait-stats', async (req, res) => {
+  const raw = String(req.params.code || '').trim();
+  const airport = AIRPORTS.find((a) => a.code === raw.toUpperCase() || a.id === raw);
+  if (!airport) {
+    return res
+      .status(404)
+      .json({ errors: [{ field: 'code', message: `Airport not found: ${raw}` }] });
+  }
+  const now = Date.now();
+  const cached = waitStatsCache.get(airport.code);
+  if (cached && cached.expiresAt > now) {
+    return res.json(cached.payload);
+  }
+  let reports = [];
+  if (db) {
+    try {
+      const rows = await db.waitTimeReport.findMany({
+        // Moderation (TIR-325): hidden reports are excluded from stats.
+        where: { airport: airport.code, moderationStatus: { not: 'hidden' } },
+        select: { waitMinutes: true, createdAt: true },
+      });
+      reports = rows.map((r) => ({ minutes: r.waitMinutes, reportedAt: r.createdAt }));
+    } catch (err) {
+      // Never serve fabricated stats on a DB error - and never cache them.
+      console.error(`wait-stats DB read failed: ${err.message}`);
+      return res.status(500).json({ error: 'Database unavailable' });
+    }
+  }
+  const payload = {
+    airport: airport.code,
+    airportName: airport.name,
+    ...computeWaitStats(airport.timezone, reports),
+    generatedAt: new Date(now).toISOString(),
+    cacheTtlSeconds: Math.round(WAIT_STATS_CACHE_TTL_MS / 1000),
+  };
+  waitStatsCache.set(airport.code, { expiresAt: now + WAIT_STATS_CACHE_TTL_MS, payload });
+  res.json(payload);
+});
+
+// --- Cross-airport wait-time summary (TIR-321 scope merge) --------------------
+// GET /api/wait-times/summary - one-call overview for the dashboard landing
+// view (TIR-317): every supported airport with its latest reported wait and a
+// trend direction. Trend compares the average wait in the current window
+// (last 3h) against the previous window (3-6h ago): 'up'/'down' when the shift
+// is >= 5 minutes, 'flat' inside the band, null when either window has no
+// reports (never fabricated). Aggregate-only: no userIds, no raw report
+// records. Compute-on-read with a single 5-minute in-memory cache entry.
+
+const WAIT_SUMMARY_CACHE_TTL_MS = 5 * 60 * 1000;
+let waitSummaryCache = null; // { expiresAt, payload }
+waitStatsInvalidators.push(() => { waitSummaryCache = null; });
+const TREND_WINDOW_MS = 3 * 60 * 60 * 1000;
+const TREND_THRESHOLD_MINUTES = 5;
+
+function windowAverage(minutes) {
+  if (minutes.length === 0) return null;
+  return Math.round((minutes.reduce((sum, m) => sum + m, 0) / minutes.length) * 10) / 10;
+}
+
+// Pure summary core (exported for unit tests): reports is a Map of
+// airportCode -> [{ minutes, reportedAt }]; now is the reference instant.
+function computeWaitTimesSummary(now, reports) {
+  const airports = AIRPORTS.map((airport) => {
+    const rows = (reports.get(airport.code) || [])
+      .map((r) => ({ minutes: r.minutes, at: r.reportedAt instanceof Date ? r.reportedAt : new Date(r.reportedAt) }))
+      .filter((r) => Number.isFinite(r.at.getTime()));
+    let latest = null;
+    for (const r of rows) {
+      if (!latest || r.at > latest.at) latest = r;
+    }
+    const current = [];
+    const previous = [];
+    for (const r of rows) {
+      const age = now - r.at.getTime();
+      if (age >= 0 && age < TREND_WINDOW_MS) current.push(r.minutes);
+      else if (age >= TREND_WINDOW_MS && age < 2 * TREND_WINDOW_MS) previous.push(r.minutes);
+    }
+    const currentAverageMinutes = windowAverage(current);
+    const previousAverageMinutes = windowAverage(previous);
+    let direction = null;
+    if (currentAverageMinutes !== null && previousAverageMinutes !== null) {
+      const delta = currentAverageMinutes - previousAverageMinutes;
+      direction =
+        delta >= TREND_THRESHOLD_MINUTES ? 'up' : delta <= -TREND_THRESHOLD_MINUTES ? 'down' : 'flat';
+    }
+    return {
+      airport: airport.code,
+      airportName: airport.name,
+      timezone: airport.timezone || 'UTC',
+      latestWaitMinutes: latest ? latest.minutes : null,
+      latestReportedAt: latest ? latest.at.toISOString() : null,
+      sampleSize: rows.length,
+      trend: {
+        direction,
+        currentAverageMinutes,
+        previousAverageMinutes,
+        currentSampleSize: current.length,
+        previousSampleSize: previous.length,
+        windowHours: TREND_WINDOW_MS / (60 * 60 * 1000),
+      },
+    };
+  });
+  const withData = airports.filter((a) => a.sampleSize > 0).length;
+  return { airportCount: airports.length, airportsWithData: withData, airports };
+}
+
+app.get('/api/wait-times/summary', async (req, res) => {
+  const now = Date.now();
+  if (waitSummaryCache && waitSummaryCache.expiresAt > now) {
+    return res.json(waitSummaryCache.payload);
+  }
+  const reports = new Map();
+  if (db) {
+    let rows = [];
+    try {
+      rows = await db.waitTimeReport.findMany({
+        // Moderation (TIR-325): hidden reports are excluded from the summary.
+        where: { moderationStatus: { not: 'hidden' } },
+        select: { airport: true, waitMinutes: true, createdAt: true },
+      });
+    } catch (err) {
+      // Never serve fabricated stats on a DB error - and never cache them.
+      console.error(`wait-times summary DB read failed: ${err.message}`);
+      return res.status(500).json({ error: 'Database unavailable' });
+    }
+    for (const r of rows) {
+      const list = reports.get(r.airport) || [];
+      list.push({ minutes: r.waitMinutes, reportedAt: r.createdAt });
+      reports.set(r.airport, list);
+    }
+  }
+  const payload = {
+    ...computeWaitTimesSummary(now, reports),
+    generatedAt: new Date(now).toISOString(),
+    cacheTtlSeconds: Math.round(WAIT_SUMMARY_CACHE_TTL_MS / 1000),
+  };
+  waitSummaryCache = { expiresAt: now + WAIT_SUMMARY_CACHE_TTL_MS, payload };
+  res.json(payload);
 });
 
 // --- Basic operational metrics (TIR-287) -------------------------------------
@@ -1209,3 +1816,12 @@ module.exports.httpServer = server;
 module.exports.computeForecast = computeForecast;
 module.exports.checkpointIdFor = checkpointIdFor;
 module.exports.findCheckpointById = findCheckpointById;
+// Exposed for the test suite: history core unit tests (checkpoint chart)
+// exercise the interval bucketing and averaging directly, without a DB.
+module.exports.bucketWaitHistory = bucketWaitHistory;
+// Exposed for the test suite: wait-stats aggregation core (TIR-321) exercised
+// directly (percentiles, timezone bucketing, empty buckets) without a DB.
+module.exports.computeWaitStats = computeWaitStats;
+// Exposed for the test suite: cross-airport summary core (TIR-321 scope merge)
+// exercised directly (latest wait, trend windows, empty airports) without a DB.
+module.exports.computeWaitTimesSummary = computeWaitTimesSummary;

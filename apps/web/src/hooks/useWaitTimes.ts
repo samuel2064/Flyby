@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { getWaitTimes, POLL_FALLBACK_MS, subscribeToLiveUpdates } from '../api/waitTimes'
+import { latestPerCheckpoint } from '../lib/latestPerCheckpoint'
 import type { WaitTime, WaitTimeUpdateEvent } from '../api/types'
 
 type FetchState = 'idle' | 'loading' | 'ready' | 'error'
@@ -46,7 +47,7 @@ export function useWaitTimes(airportCode: string): UseWaitTimesResult {
     getWaitTimes(airportCode)
       .then((rows) => {
         if (cancelled) return
-        setWaitTimes(rows)
+        setWaitTimes(latestPerCheckpoint(rows))
         setLastUpdated(new Date().toISOString())
         setState('ready')
       })
@@ -84,7 +85,7 @@ export function useWaitTimes(airportCode: string): UseWaitTimesResult {
       getWaitTimes(airportCode)
         .then((rows) => {
           if (rows.length > 0) {
-            setWaitTimes(rows)
+            setWaitTimes(latestPerCheckpoint(rows))
             setLastUpdated(new Date().toISOString())
           }
         })
