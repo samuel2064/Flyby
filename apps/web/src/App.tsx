@@ -112,7 +112,7 @@ export default function App() {
           </div>
         </section>
 
-        <p className="mt-10 text-center text-xs text-slate-400">
+        <p className="mt-10 text-center text-xs text-slate-500">
           Flyby · crowdsourced airport security wait times
         </p>
       </main>
