@@ -2,7 +2,7 @@
 // Handles registration, update notifications, and offline/online event propagation
 
 export function registerServiceWorker(): void {
-  if (import.meta.env.DEV || !('serviceWorker' in navigator)) {
+  if (!('serviceWorker' in navigator)) {
     return
   }
 

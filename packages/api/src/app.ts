@@ -132,6 +132,14 @@ app.use(cacheHeaders);
 // docker-compose.yml and Dockerfile HEALTHCHECK directives)
 app.get("/health", healthHandler);
 app.get("/api/health", healthHandler);
+app.get("/api/version", (_req, res) => {
+  res.json({ version: process.env.npm_package_version || "0.1.0" });
+});
+
+// Commit hash endpoint for CI debugging
+app.get("/api/commit", (_req, res) => {
+  res.json({ commit: process.env.GIT_COMMIT || "unknown" });
+});
 
 // Prometheus metrics endpoint
 app.get("/metrics", async (req, res) => {

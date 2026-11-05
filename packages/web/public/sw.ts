@@ -124,5 +124,18 @@ self.addEventListener('message', (event) => {
   }
 });
 
+// Background sync for offline wait-time reports
+self.addEventListener('sync', (event) => {
+  if (event.tag === 'sync-reports') {
+    event.waitUntil(
+      // The BackgroundSyncPlugin handles retry of failed POST requests.
+      // This listener ensures the sync tag is acknowledged and logged.
+      Promise.resolve().then(() => {
+        console.log('[SW] Background sync triggered for tag:', event.tag);
+      })
+    );
+  }
+});
+
 // Export for workbox
 export {};

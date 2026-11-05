@@ -7,7 +7,7 @@ import { decodeToken } from "./auth";
 import { computeAccuracy, computeConsensus, VISIBLE_REPORT_WHERE } from "./waitTimeUtils";
 import { dispatchWaitTimeAlerts } from "./notifications";
 import { resolveCompatCheckpointId } from "./deployCompat";
-import { validateUUID, validateReportedAt, validateMinutes, validateLineType, validateReportType } from "./validation";
+import { validateUUID, validateReportedAt, validateMinutes, validateLineType, validateReportType, validateSource } from "./validation";
 
 // Rate limiting for reports
 export const reportRateLimits = new Map<string, { count: number; lastReportTime: number }>();
@@ -929,8 +929,8 @@ export const reportWaitTime = async (req: Request, res: Response) => {
   let reportType: string = "standard";
   let source: string = "crowd";
 
-  // Support waitTimeMinutes alias for minutes
-  if (minutes === undefined && typeof req.body.waitTimeMinutes === "number") {
+  // Support waitTimeMinutes alias for minutes - takes priority over minutes
+  if (typeof req.body.waitTimeMinutes === "number") {
     minutes = req.body.waitTimeMinutes;
   }
 
@@ -980,15 +980,12 @@ else if (req.body.reportType !== undefined && req.body.reportType !== null) {
 }
 // Validate source if neither lineType nor reportType provided
 else if (req.body.source !== undefined && req.body.source !== null) {
-  if (typeof req.body.source !== "string") {
-    res.status(400).json({ error: "source must be a string" });
+  const sourceValidation = validateSource(req.body.source);
+  if (!sourceValidation.valid) {
+    res.status(400).json({ error: sourceValidation.error });
     return;
   }
-  if (!["crowd", "official"].includes(req.body.source)) {
-    source = "crowd";
-  } else {
-    source = req.body.source;
-  }
+  source = sourceValidation.source;
   reportType = "standard";
 }
 // If none provided, reportType remains "standard" and source defaults to "crowd" below

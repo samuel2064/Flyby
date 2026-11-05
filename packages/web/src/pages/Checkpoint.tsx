@@ -100,6 +100,13 @@ function getWaitBg(minutes: number | null) {
   return "bg-red-50";
 }
 
+function getCrowdingLevel(minutes: number | null): { label: string; color: string } {
+  if (minutes === null) return { label: "Unknown", color: "text-gray-400" };
+  if (minutes <= 15) return { label: "Low", color: "text-green-600" };
+  if (minutes <= 30) return { label: "Moderate", color: "text-yellow-600" };
+  return { label: "High", color: "text-red-600" };
+}
+
 function getAccuracyColor(accuracy: number) {
   if (accuracy >= 70) return "text-green-600";
   if (accuracy >= 40) return "text-yellow-600";
@@ -263,6 +270,11 @@ export default function Checkpoint() {
           <p className="text-gray-500 text-sm">
             {data.airportName} ({data.airportCode}) — Terminal {data.terminal || "N/A"}
           </p>
+          {data.latestWaitTimeMinutes !== null && (
+            <p className="text-xs text-gray-500 mt-1">
+              Crowding: <span className={`font-medium ${getCrowdingLevel(data.latestWaitTimeMinutes).color}`}>{getCrowdingLevel(data.latestWaitTimeMinutes).label}</span>
+            </p>
+          )}
         </div>
         <div className="flex items-center gap-2">
           <NotifyToggle airportId={data.airportId} airportCode={data.airportCode} />

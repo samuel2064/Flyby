@@ -78,7 +78,7 @@ function auditReportDeletion(
 //   404 — well-formed id that does not exist (also for repeat deletes)
 //   204 — deleted
 // Allowed reasons for flagging a crowd report as abusive/inaccurate.
-const FLAG_REASONS = new Set(["wrong_location", "inaccurate", "spam", "other"]);
+export const FLAG_REASONS = new Set(["wrong_location", "inaccurate", "spam", "other"]);
 
 // POST /api/reports/:id/flag — traveler flags a report as suspect.
 // Body: { reason, note?, sessionId? }. Session id comes from the X-Session-Id
