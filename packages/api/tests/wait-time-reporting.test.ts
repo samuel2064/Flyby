@@ -179,12 +179,12 @@ describe("POST /api/reports — comprehensive validation", () => {
     expect(res.status).toBe(201);
   });
 
-  it("defaults invalid source to crowd on reports endpoint", async () => {
+  it("rejects invalid source with 400 on reports endpoint", async () => {
     const res = await request(app)
       .post("/api/reports")
       .send({ checkpointId: cpId, minutes: 15, source: "invalid_source", reportedAt: new Date().toISOString() });
-    expect(res.status).toBe(201);
-    expect(res.body.data.source).toBe("crowd");
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain("Invalid source");
   });
 
   it("defaults source to crowd when not specified", async () => {
@@ -203,12 +203,12 @@ describe("POST /api/reports — comprehensive validation", () => {
     expect(res.body.data.source).toBe("official");
   });
 
-it("defaults invalid source to crowd on checkpoints endpoint", async () => {
+it("rejects invalid source with 400 on checkpoints endpoint", async () => {
     const res = await request(app)
       .post(`/api/checkpoints/${cpId}/wait-times`)
       .send({ minutes: 15, source: "unknown", reportedAt: new Date().toISOString() });
-    expect(res.status).toBe(201);
-    expect(res.body.data.source).toBe("crowd");
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain("Invalid source");
   });
 
   it("accepts lineType standard", async () => {

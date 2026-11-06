@@ -312,8 +312,18 @@ describe("GET /api/checkpoints/:id/predict — deterministic pattern matching", 
 });
 
 describe("GET /api/checkpoints/:id/predict — timezone bucketing", () => {
+  // Airport-local hour of an instant, computed via the same IANA tz database
+  // the server uses. DST-aware, so this is stable across EDT/EST transitions.
+  const localHourOf = (instant: Date, timeZone: string): number => {
+    const hour = new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      hour: "numeric",
+      hour12: false,
+    }).format(instant);
+    return Number(hour) % 24;
+  };
+
   it("buckets reports by airport-local hour, not UTC hour", async () => {
-    // America/New_York in September is UTC-4 (EDT): 04:00Z maps to local hour 0.
     const airport = await prisma.airport.create({
       data: {
         code: "NYC1",
@@ -330,9 +340,13 @@ describe("GET /api/checkpoints/:id/predict — timezone bucketing", () => {
     });
     const nyId = airport.checkpoints[0].id;
 
-    // 3 days ago at 04:00Z = midnight local (hour 0).
+    // 3 days ago at 04:00Z. In EDT that is local hour 0; in EST (after the
+    // November DST transition) it is local hour 23 of the previous day. The
+    // expected hour is derived from the tz database instead of hardcoded so
+    // the test is correct in either regime.
     const at = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
     at.setUTCHours(4, 0, 0, 0);
+    const expectedLocalHour = localHourOf(at, "America/New_York");
     for (const minutes of [20, 30, 40]) {
       await prisma.waitTime.create({
         data: {
@@ -354,14 +368,16 @@ describe("GET /api/checkpoints/:id/predict — timezone bucketing", () => {
       expect(d.overallAverageMinutes).toBe(30);
 
       // With a 24h horizon every local hour appears exactly once.
-      const midnightPred = d.predictions.find((p: { hour: number }) => p.hour === 0);
-      expect(midnightPred).toBeDefined();
-      expect(midnightPred.source).toBe("pattern");
-      expect(midnightPred.predictedMinutes).toBe(30); // (20+30+40)/3
-      expect(midnightPred.sampleCount).toBe(3);
-      expect(midnightPred.confidence).toBe(0.3); // 3/10
+      const expectedPred = d.predictions.find((p: { hour: number }) => p.hour === expectedLocalHour);
+      expect(expectedPred).toBeDefined();
+      expect(expectedPred.source).toBe("pattern");
+      expect(expectedPred.predictedMinutes).toBe(30); // (20+30+40)/3
+      expect(expectedPred.sampleCount).toBe(3);
+      expect(expectedPred.confidence).toBe(0.3); // 3/10
 
-      // 04:00Z is local hour 0, NOT UTC hour 4 — hour 4 must not carry these samples.
+      // Samples must land in the airport-LOCAL hour, never the UTC hour —
+      // 04:00Z is never local hour 4 in New York, in any DST regime.
+      expect(expectedLocalHour).not.toBe(4);
       const hourFourPred = d.predictions.find((p: { hour: number }) => p.hour === 4);
       expect(hourFourPred.source).toBe("fallback");
       expect(hourFourPred.sampleCount).toBe(0);

@@ -271,12 +271,12 @@ describe("POST /api/checkpoints/:id/wait-times — source validation edge cases"
     cpId = checkpointsRes.body.data[0].id;
   });
 
-  it("defaults to crowd when source is invalid string (not 'official')", async () => {
+  it("rejects invalid source string with 400 (not 'official')", async () => {
     const res = await request(app)
       .post(`/api/checkpoints/${cpId}/wait-times`)
       .send({ minutes: 15, source: "not-official-or-crowd", reportedAt: new Date().toISOString() });
-    expect(res.status).toBe(201);
-    expect(res.body.data.source).toBe("crowd");
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain("Invalid source");
   });
 
   it("accepts source: 'official' explicitly", async () => {
@@ -295,12 +295,12 @@ describe("POST /api/checkpoints/:id/wait-times — source validation edge cases"
     expect(res.body.data.source).toBe("crowd");
   });
 
-  it("defaults to crowd when source is empty string", async () => {
+  it("rejects empty string source with 400", async () => {
     const res = await request(app)
       .post(`/api/checkpoints/${cpId}/wait-times`)
       .send({ minutes: 15, source: "", reportedAt: new Date().toISOString() });
-    expect(res.status).toBe(201);
-    expect(res.body.data.source).toBe("crowd");
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain("Invalid source");
   });
 });
 

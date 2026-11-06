@@ -452,7 +452,7 @@ describe("POST /api/checkpoints/:id/wait-times — edge cases", () => {
     expect(res.status).toBe(400);
   });
 
-  it("defaults invalid source to crowd", async () => {
+  it("rejects invalid source with 400", async () => {
     const checkpointsRes = await request(app).get("/api/checkpoints");
     const cpId = checkpointsRes.body.data[0].id;
     const sessionId = "api-edge-source-unknown";
@@ -461,8 +461,8 @@ describe("POST /api/checkpoints/:id/wait-times — edge cases", () => {
       .post(`/api/checkpoints/${cpId}/wait-times`)
       .set("X-Session-Id", sessionId)
       .send({ minutes: 15, source: "unknown_source_value", reportedAt: new Date().toISOString() });
-    expect(res.status).toBe(201);
-    expect(res.body.data.source).toBe("crowd");
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain("Invalid source");
   });
 
   it("returns response with all expected fields", async () => {
