@@ -7,6 +7,8 @@ import { useSse } from '../hooks/useSse';
 import { useRefreshInterval } from '../hooks/useRefreshInterval';
 import { SkeletonCard } from '../components/Skeleton';
 import ReportModal from '../components/ReportModal';
+import { ReportSheet } from '../components/ReportSheet';
+import { DEFAULT_AIRPORT } from '../data/airports';
 
 interface Checkpoint {
   id: string;
@@ -70,6 +72,7 @@ function groupByAirport(checkpoints: Checkpoint[]): AirportGroup[] {
 
 export default function Home() {
   const [reporting, setReporting] = useState<string | null>(null);
+  const [reportPickerOpen, setReportPickerOpen] = useState(false);
   const [search, setSearch] = useState('');
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const { isOnline, pendingCount, syncQueue } = useOfflineQueue();
@@ -164,7 +167,15 @@ export default function Home() {
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
-        <h2 className="text-2xl font-bold">Live Wait Times</h2>
+        <div>
+          <h2 className="text-2xl font-bold">Live Wait Times</h2>
+          <button
+            onClick={() => setReportPickerOpen(true)}
+            className="mt-2 text-sm bg-brand text-white px-3 py-1 rounded hover:bg-brandDark transition"
+          >
+            Report a wait time
+          </button>
+        </div>
         <div className="flex items-center gap-2">
           {isRevalidating && (
             <span className="text-xs bg-blue-50 text-blue-600 px-2 py-1 rounded flex items-center gap-1" data-testid="revalidating-status">
@@ -278,6 +289,14 @@ export default function Home() {
           checkpointId={reporting}
           checkpointName={checkpoints.find((c) => c.id === reporting)?.name || ''}
           onClose={() => setReporting(null)}
+          onReported={fetchData}
+        />
+      )}
+      {reportPickerOpen && (
+        <ReportSheet
+          open={reportPickerOpen}
+          airportCode={DEFAULT_AIRPORT.code}
+          onClose={() => setReportPickerOpen(false)}
           onReported={fetchData}
         />
       )}
