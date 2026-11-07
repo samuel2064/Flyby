@@ -77,18 +77,41 @@ export interface AlertDecision {
   reason: string;
 }
 
+// VAPID application keys (RFC 8292): a P-256 public key (65 bytes, uncompressed
+// point) and a 32-byte private key, both urlsafe-base64 encoded. web-push's
+// setVapidDetails() THROWS on keys that don't decode to those lengths, so env
+// values are validated before use — a malformed copy-pasted key (e.g. a bad
+// paste into the Render dashboard) must degrade to ephemeral-key generation,
+// never crash the send path or serve a broken applicationServerKey to PWAs.
+const VAPID_PUBLIC_KEY_BYTES = 65;
+const VAPID_PRIVATE_KEY_BYTES = 32;
+
+export function isValidVapidKeyPair(publicKey: string, privateKey: string): boolean {
+  try {
+    return (
+      Buffer.from(publicKey, "base64url").length === VAPID_PUBLIC_KEY_BYTES &&
+      Buffer.from(privateKey, "base64url").length === VAPID_PRIVATE_KEY_BYTES
+    );
+  } catch {
+    return false;
+  }
+}
+
 async function getOrCreateVapidKeys() {
-  const existing = process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY;
-  if (existing) {
-    return {
-      publicKey: process.env.VAPID_PUBLIC_KEY!,
-      privateKey: process.env.VAPID_PRIVATE_KEY!,
-    };
+  const publicKey = process.env.VAPID_PUBLIC_KEY?.trim() || "";
+  const privateKey = process.env.VAPID_PRIVATE_KEY?.trim() || "";
+  if (publicKey && privateKey && isValidVapidKeyPair(publicKey, privateKey)) {
+    return { publicKey, privateKey };
+  }
+  if (publicKey || privateKey) {
+    console.warn(
+      "VAPID_PUBLIC_KEY/VAPID_PRIVATE_KEY are set but malformed (expected 65-byte public and 32-byte private urlsafe base64). Falling back to ephemeral keys — fix the env values; push subscriptions made against the ephemeral key stop working once valid keys are configured."
+    );
+  } else {
+    console.warn("No VAPID keys in env. Generated ephemeral keys — set VAPID_PUBLIC_KEY and VAPID_PRIVATE_KEY in production.");
   }
   const { generateVAPIDKeys } = await getWebPush();
-  const vapidKeys = generateVAPIDKeys();
-  console.warn("No VAPID keys in env. Generated ephemeral keys — set VAPID_PUBLIC_KEY and VAPID_PRIVATE_KEY in production.");
-  return vapidKeys;
+  return generateVAPIDKeys();
 }
 
 /**
