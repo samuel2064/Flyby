@@ -100,8 +100,9 @@ async function getText(fetchImpl, url, timeoutMs) {
   }
 }
 
-/** Reads an SSE stream until the first `data:` frame arrives, then aborts. */
-async function getFirstSseFrame(fetchImpl, url, timeoutMs) {
+/** Reads an SSE stream until the first `data:` frame arrives, then aborts.
+ * Exported so scripts/live-smoke.mjs shares this exact implementation. */
+export async function getFirstSseFrame(fetchImpl, url, timeoutMs) {
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), timeoutMs);
   let frame = null;

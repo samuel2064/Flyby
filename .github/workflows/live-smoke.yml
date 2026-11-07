@@ -1,0 +1,81 @@
+name: Live Smoke
+
+# M4 cutover Step 4 ("Live smoke + 30-min watch window") — TIR-339.
+#
+# Proves the WRITE path end-to-end against a live origin (submit a crowd
+# report, see it in the wait-times list, check submission latency, then clean
+# the row up with the admin key). Companion to the read-surface pre-flight in
+# scripts/staging-verify.mjs.
+#
+# Manual: run from the Actions tab with the API base URL (cutover day).
+# Scheduled: every 15 minutes once a repository variable
+# `ENABLE_LIVE_SMOKE = true` is set (watch window); the variable also carries
+# the default API URL (vars.LIVE_SMOKE_API_URL). ADMIN_API_KEY (secret) is
+# optional — without it the smoke row is left in place and cleanup is skipped.
+
+on:
+  workflow_dispatch:
+    inputs:
+      api_url:
+        description: "API base URL to smoke (e.g. https://flyby-api.onrender.com)"
+        required: false
+        default: ""
+      max_post_ms:
+        description: "Report-submission latency budget in ms"
+        required: false
+        default: "5000"
+      keep_reports:
+        description: "Keep the smoke report row (skip admin cleanup)"
+        type: boolean
+        required: false
+        default: false
+  schedule:
+    # Watch window: every 15 minutes. Only runs when ENABLE_LIVE_SMOKE=true.
+    - cron: "*/15 * * * *"
+
+concurrency:
+  group: live-smoke
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  live-smoke:
+    name: Live Smoke (${{ inputs.api_url || vars.LIVE_SMOKE_API_URL || 'default' }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: github.event_name != 'schedule' || vars.ENABLE_LIVE_SMOKE == 'true'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js 22.x
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+
+      # No npm ci needed: the harness is dependency-free plain ESM.
+
+      - name: Run live smoke
+        id: smoke
+        shell: bash
+        run: |
+          API_URL="${{ inputs.api_url }}"
+          if [ -z "$API_URL" ]; then API_URL="${{ vars.LIVE_SMOKE_API_URL }}"; fi
+          if [ -z "$API_URL" ]; then
+            echo "::error::No api_url input and no vars.LIVE_SMOKE_API_URL configured"; exit 1
+          fi
+          ARGS=(--api "$API_URL" --report tmp/live-smoke.json)
+          if [ -n "${{ inputs.max_post_ms }}" ]; then ARGS+=(--max-post-ms "${{ inputs.max_post_ms }}"); fi
+          if [ "${{ inputs.keep_reports }}" = "true" ]; then ARGS+=(--keep-reports); fi
+          node scripts/live-smoke.mjs "${ARGS[@]}"
+        env:
+          FLYBY_ADMIN_KEY: ${{ secrets.ADMIN_API_KEY }}
+
+      - name: Upload smoke report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-smoke-report
+          path: tmp/live-smoke.json
+          if-no-files-found: ignore

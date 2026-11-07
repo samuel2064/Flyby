@@ -13,6 +13,7 @@
     "test:e2e": "npm run e2e --workspace=packages/e2e",
     "test:e2e:ui": "npm run e2e:ui --workspace=packages/e2e",
     "verify:staging": "node scripts/staging-verify.mjs",
+    "smoke:live": "node scripts/live-smoke.mjs",
     "lint": "npm run lint --workspace=packages/api --if-present && npm run lint --workspace=packages/web --if-present",
     "db:generate": "cd packages/api && npx prisma generate",
     "db:migrate": "cd packages/api && npx prisma migrate dev",

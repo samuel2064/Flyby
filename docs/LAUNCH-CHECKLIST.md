@@ -53,7 +53,21 @@ Then the 32-probe corpus: `node scripts/contract-compare.mjs --candidate <stagin
 - [ ] CEO go/no-go recorded on TIR-339
 - [ ] Flip: web `VITE_API_BASE_URL` -> monorepo API URL (blueprint env or dashboard)
 - [ ] Old flyby-api service stays warm through the window (rollback = flip the env var back)
-- [ ] Live smoke + 30-min watch window
+- [ ] Live smoke + 30-min watch window:
+      ```bash
+      # one-shot against the new production API (write path: submit -> see it -> clean up)
+      FLYBY_ADMIN_KEY=<key> npm run smoke:live -- \
+        --api https://flyby-api.onrender.com \
+        --report tmp/live-smoke-prod.json
+      # or from the Actions tab: "Live Smoke" workflow (workflow_dispatch, api_url input)
+      ```
+      Covers: health, airports, `POST /api/wait-times` (201 + body shape),
+      read-after-write visibility, submission-latency budget, SSE connect
+      frame, admin-key cleanup of the smoke row. Exit 0 = write path alive.
+      Watch window: set repo variables `ENABLE_LIVE_SMOKE=true` and
+      `LIVE_SMOKE_API_URL=https://flyby-api.onrender.com` (plus secret
+      `ADMIN_API_KEY`) — the `live-smoke.yml` workflow then runs every 15 min;
+      clear `ENABLE_LIVE_SMOKE` when the window closes.
 
 ### Production Verification
 - [ ] `https://flyby-api.onrender.com/api/health` -> `{"status":"ok","services":{"database":"ok","redis":"ok"}}`
