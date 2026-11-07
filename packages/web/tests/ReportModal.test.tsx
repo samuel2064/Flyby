@@ -37,26 +37,25 @@ describe("ReportModal", () => {
     expect(screen.getByText("Test Checkpoint")).toBeDefined();
   });
 
-  it("displays the slider with default value of 15", async () => {
+  it("displays preset wait-time options with default 15 min selected", async () => {
     await act(async () => {
       render(<ReportModal {...defaultProps} />);
     });
-    expect(screen.getByText("15 min")).toBeDefined();
-    const slider = document.querySelector('input[type="range"]') as HTMLInputElement;
-    expect(slider).not.toBeNull();
-    expect(slider.value).toBe("15");
+    expect(screen.getByText("15")).toBeDefined();
+    const selected = document.querySelector('button[aria-pressed="true"]') as HTMLButtonElement;
+    expect(selected).not.toBeNull();
+    expect(selected.textContent).toBe("15");
   });
 
-  it("updates minute display when slider changes", async () => {
+  it("updates selected wait time when a preset is clicked", async () => {
     await act(async () => {
       render(<ReportModal {...defaultProps} />);
     });
 
-    const slider = document.querySelector('input[type="range"]') as HTMLInputElement;
-    expect(slider).not.toBeNull();
-
-    fireEvent.change(slider, { target: { value: "45" } });
+    fireEvent.click(screen.getByText("45"));
     expect(screen.getByText("45 min")).toBeDefined();
+    const selected = document.querySelector('button[aria-pressed="true"]') as HTMLButtonElement;
+    expect(selected.textContent).toBe("45");
   });
 
   it("shows Submit button when online", async () => {

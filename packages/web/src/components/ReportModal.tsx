@@ -9,13 +9,20 @@ interface ReportModalProps {
   onReported: () => void;
 }
 
+const WAIT_OPTIONS: number[] = [5, 10, 15, 20, 30, 45, 60];
+
 export default function ReportModal({ checkpointId, checkpointName, onClose, onReported }: ReportModalProps) {
-  const [minutes, setMinutes] = useState(15);
+  const [minutes, setMinutes] = useState(WAIT_OPTIONS[2]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
   const [retryAfter, setRetryAfter] = useState<number | null>(null);
   const { isOnline, queueReport, pendingCount } = useOfflineQueue();
+
+  const selectMinutes = (value: number) => {
+    setMinutes(value);
+    setError(null);
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -127,16 +134,26 @@ setSuccess(true);
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <label className="block text-sm font-medium mb-1">Wait time (minutes)</label>
-              <input
-                type="range"
-                min={0}
-                max={120}
-                step={5}
-                value={minutes}
-                onChange={(e) => setMinutes(Number(e.target.value))}
-                className="w-full"
-              />
-              <div className="text-center text-3xl font-bold text-brand mt-2">{minutes} min</div>
+              <div className="grid grid-cols-4 gap-2">
+                {WAIT_OPTIONS.map((option) => (
+                  <button
+                    key={option}
+                    type="button"
+                    onClick={() => selectMinutes(option)}
+                    aria-pressed={minutes === option}
+                    className={`h-12 rounded-xl border text-sm font-semibold transition focus:outline-none focus:ring-2 focus:ring-brand-500/40 ${
+                      minutes === option
+                        ? "border-brand-500 bg-brand-500 text-white"
+                        : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+                    }`}
+                  >
+                    {option === 60 ? "60+" : option}
+                  </button>
+                ))}
+              </div>
+              <p className="text-center text-xs text-gray-500 mt-1">
+                {minutes} min
+              </p>
             </div>
 
             {error && <p className="text-sm text-red-600">{error}</p>}

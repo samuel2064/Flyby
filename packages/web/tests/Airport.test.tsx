@@ -349,19 +349,13 @@ describe("Airport page", () => {
       expect(screen.getByText("Report Wait Time")).toBeDefined();
     });
 
-    // Submit a report through the modal
-    const slider = screen.getByRole("slider");
-    fireEvent.change(slider, { target: { value: "25" } });
-
-    // Mock the fetch for report submission
+    // Submit a report through the modal (default preset is 15 min)
     const reportFetch = vi.spyOn(globalThis, "fetch" as any).mockResolvedValue({
       ok: true,
       status: 200,
       statusText: "OK",
       json: () => Promise.resolve({ success: true }),
     });
-
-    // Submit the form - this tests that the form submission works
     const submitButton = screen.getByText("Submit");
     fireEvent.click(submitButton);
 
@@ -371,7 +365,7 @@ describe("Airport page", () => {
       expect.objectContaining({
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: expect.stringContaining("25"),
+        body: expect.stringContaining("15"),
       })
     );
 
