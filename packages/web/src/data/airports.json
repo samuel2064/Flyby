@@ -1,0 +1,36 @@
+{
+  "airports": [
+    { "id": "apt-jfk", "code": "JFK", "name": "John F. Kennedy International", "city": "New York", "timezone": "America/New_York" },
+    { "id": "apt-sea", "code": "SEA", "name": "Seattle-Tacoma International", "city": "Seattle", "timezone": "America/Los_Angeles" },
+    { "id": "apt-lax", "code": "LAX", "name": "Los Angeles International", "city": "Los Angeles", "timezone": "America/Los_Angeles" },
+    { "id": "apt-ord", "code": "ORD", "name": "O'Hare International", "city": "Chicago", "timezone": "America/Chicago" },
+    { "id": "apt-sfo", "code": "SFO", "name": "San Francisco International", "city": "San Francisco", "timezone": "America/Los_Angeles" },
+    { "id": "apt-atl", "code": "ATL", "name": "Hartsfield-Jackson Atlanta International", "city": "Atlanta", "timezone": "America/New_York" },
+    { "id": "apt-dfw", "code": "DFW", "name": "Dallas/Fort Worth International", "city": "Dallas", "timezone": "America/Chicago" },
+    { "id": "apt-den", "code": "DEN", "name": "Denver International", "city": "Denver", "timezone": "America/Denver" },
+    { "id": "apt-las", "code": "LAS", "name": "Harry Reid International", "city": "Las Vegas", "timezone": "America/Los_Angeles" },
+    { "id": "apt-mco", "code": "MCO", "name": "Orlando International", "city": "Orlando", "timezone": "America/New_York" },
+    { "id": "apt-clt", "code": "CLT", "name": "Charlotte Douglas International", "city": "Charlotte", "timezone": "America/New_York" },
+    { "id": "apt-evr", "code": "EWR", "name": "Newark Liberty International", "city": "Newark", "timezone": "America/New_York" },
+    { "id": "apt-phx", "code": "PHX", "name": "Phoenix Sky Harbor International", "city": "Phoenix", "timezone": "America/Phoenix" },
+    { "id": "apt-mia", "code": "MIA", "name": "Miami International", "city": "Miami", "timezone": "America/New_York" },
+    { "id": "apt-bos", "code": "BOS", "name": "Logan International", "city": "Boston", "timezone": "America/New_York" }
+  ],
+  "checkpointsByAirport": {
+    "JFK": ["Main", "Terminal 1 Security", "Terminal 4 Security", "Terminal 5 Security", "Terminal 8 Security"],
+    "SEA": ["Main", "North Checkpoint", "South Checkpoint", "D Checkpoint", "E Checkpoint"],
+    "LAX": ["Main", "Terminal 1 Security", "Terminal 4 Security", "Tom Bradley Terminal Security", "Terminal 5 Security"],
+    "ORD": ["Main", "Terminal 1 Security A", "Terminal 3 Security A", "Terminal 5 Security A", "International Terminal Security"],
+    "SFO": ["Main", "Terminal 2 Security", "Terminal 3 Security", "International Terminal G", "International Terminal A"],
+    "ATL": ["Domestic North Checkpoint A", "Domestic North Checkpoint B", "Domestic South Checkpoint A", "Domestic South Checkpoint B"],
+    "DFW": ["Terminal A Security", "Terminal B Security", "Terminal C Security", "Terminal E Security"],
+    "DEN": ["West Security Checkpoint A", "West Security Checkpoint B", "South Security Checkpoint A", "South Security Checkpoint B"],
+    "LAS": ["Terminal 1 Security", "Terminal 3 Security", "Terminal 3 D Gates"],
+    "MCO": ["Side A Security", "Side B Security", "Side C Security", "Side D Security"],
+    "CLT": ["Atrium A Security", "Atrium B Security", "Atrium C Security", "Atrium D Security"],
+    "EWR": ["Terminal A Security", "Terminal B Security", "Terminal C Security"],
+    "PHX": ["Terminal 3 Security A", "Terminal 3 Security B", "Terminal 4 Security", "Terminal 4 Security B"],
+    "MIA": ["North Checkpoint", "South Checkpoint", "Central Lobby B"],
+    "BOS": ["Terminal A Security", "Terminal B Security", "Terminal C Security", "Terminal E Security"]
+  }
+}

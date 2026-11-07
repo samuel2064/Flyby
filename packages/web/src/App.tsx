@@ -1,8 +1,8 @@
-import { Routes, Route, Link } from 'react-router-dom'
+import { Routes, Route, Link, useParams, useNavigate } from 'react-router-dom'
 import { useState, useEffect } from 'react'
 import { useAuth } from './contexts/AuthContext'
-import Home from './pages/Home'
-import Airport from './pages/Airport'
+import { PublicDashboard } from './components/PublicDashboard'
+import { AirportDetail } from './components/AirportDetail'
 import Checkpoint from './pages/Checkpoint'
 import Search from './pages/Search'
 import Dashboard from './pages/Dashboard'
@@ -55,8 +55,21 @@ function InstallPrompt() {
   )
 }
 
+function AirportDetailRoute() {
+  const { code } = useParams<{ code: string }>()
+  const navigate = useNavigate()
+  if (!code) return <NotFound />
+  return (
+    <AirportDetail
+      code={code.toUpperCase()}
+      onBack={() => navigate('/')}
+    />
+  )
+}
+
 function App() {
-  const { user, logout } = useAuth();
+  const { user, logout } = useAuth()
+  const navigate = useNavigate()
 
   return (
     <div className="min-h-screen bg-gray-50 text-gray-900">
@@ -87,13 +100,20 @@ function App() {
       <main className="max-w-3xl mx-auto p-4">
         <ErrorBoundary>
           <Routes>
-            <Route path="/" element={<Home />} />
+            <Route
+              path="/"
+              element={
+                <PublicDashboard
+                  onSelectAirport={(a) => navigate(`/airport/${a.airport}`)}
+                />
+              }
+            />
             <Route path="/search" element={<Search />} />
             <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
             <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
             <Route path="/login" element={<Login />} />
             <Route path="/signup" element={<Signup />} />
-            <Route path="/airport/:code" element={<Airport />} />
+            <Route path="/airport/:code" element={<AirportDetailRoute />} />
             <Route path="/checkpoint/:id" element={<Checkpoint />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
