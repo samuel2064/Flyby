@@ -1,9 +1,9 @@
 {
-  "note": "Approved divergences for the monorepo-as-target migration (TIR-339). Each entry documents a path where the monorepo response shape legitimately differs from the deploy repo; QA consumed by contract-test suite on both sides before cutover (M3 gate).",
+  "note": "Approved divergences for the monorepo-as-target migration (TIR-339). Each entry documents a path where the monorepo response shape legitimately differs from the deploy repo; QA consumed by contract-test suite on both sides before cutover (M3 gate). Patterns match the bare route path (no query string).",
   "patterns": [
     {
       "routePattern": "^/api/airports$",
-      "note": "Wrapper convention differs: monorepo returns { data: [...] } where deploy-era returned { airports: [...] }. The deployed WEB's search reads the shared data file (TIR-313) and never calls it without a query - QA probes retargeted."
+      "note": "Wrapper convention differs: monorepo returns { data: [...] } where deploy-era returned { airports: [...] }. The deployed WEB's search reads the shared data file (TIR-313) and never calls it without a query - QA probes retargeted. Order and names now canonical (seed file reconciled to deploy data file, 2026-11-06)."
     },
     {
       "routePattern": "^/api/airports/[^/]+$",
@@ -11,7 +11,43 @@
     },
     {
       "routePattern": "^/api/wait-times$",
-      "note": "Monorepo's compat route added in M1; shape mirrored exactly from deploy. Wrapping differs from the native monorepo GET /api/wait-times didn't exist pre-M1."
+      "note": "Monorepo's compat route added in M1; shape mirrored exactly from deploy. Wrapping differs from the native monorepo GET /api/wait-times didn't exist pre-M1. Row population is live-data dependent (a fresh candidate DB legitimately serves fewer rows than prod)."
+    },
+    {
+      "routePattern": "^/api/health$",
+      "note": "Ops-only surface, richer on the monorepo: candidate adds uptime_seconds/environment/version/services{database,redis} where deploy returns {status,timestamp,service}. Not a traveler read/write surface; QA probes retarget to status+timestamp. deployCompat mount decision recorded 2026-11-06."
+    },
+    {
+      "routePattern": "^/api/vapid-public-key$",
+      "note": "Instance-config dependent: the public key value equals the VAPID keypair provisioned per environment. Byte equality requires copying prod's VAPID private key into the staging/cutover service env (push subscriptions otherwise break). Shape contract (string publicKey) is enforced by the probe."
+    },
+    {
+      "routePattern": "^/api/subscriptions$",
+      "note": "Redaction contract enforced (no endpoint/userId/p256dh on the wire); row contents are live-data dependent (fresh candidate DB legitimately serves fewer rows)."
+    },
+    {
+      "routePattern": "^/api/events$",
+      "note": "SSE connect frame is byte-equal modulo the self-generated timestamp inside the frame; normalize() marks it #iso#. Time-variant by construction."
+    },
+    {
+      "routePattern": "^/api/notifications/preferences/[^/]+$",
+      "note": "Per-user prefs defaults are byte-equal modulo the row's self-generated updatedAt; time-variant by construction."
+    },
+    {
+      "routePattern": "^/api/wait-times/summary$",
+      "note": "generatedAt/cacheTtlSeconds are self-generated; airport rows with data are live-data dependent (fresh candidate DB has no reports). Canonical order + names reconciled to deploy data file 2026-11-06; remaining byte diffs are data-population only."
+    },
+    {
+      "routePattern": "^/api/airports/[^/]+/wait-stats$",
+      "note": "generatedAt is self-generated; sampleSize/buckets are live-data dependent (fresh candidate DB has no reports). Names reconciled 2026-11-06."
+    },
+    {
+      "routePattern": "^/api/airports/[^/]+/forecasts$",
+      "note": "Checkpoint row values (checkpointId, code, terminal) mirror the source DB: prod rows carry ck-* slug ids and null code/terminal; a freshly seeded candidate DB has UUID ids and coded checkpoints. The M2 data-migration CLI preserves deploy checkpoint ids, so the post-migration candidate byte-matches. Response skeleton (airportCode/name/timezone/horizon/forecast arrays) is contract-equal."
+    },
+    {
+      "routePattern": "^/api/checkpoints/[^/]+/predict$",
+      "note": "Same checkpoint-row data dependency as forecasts: checkpointId/code/terminal come from the DB and converge after migrate:deploy-data (deploy ids preserved). Contract (status, shape, no fabricated stats) enforced by probe predicates."
     }
   ]
 }

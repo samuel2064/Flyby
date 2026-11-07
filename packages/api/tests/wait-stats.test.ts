@@ -195,15 +195,16 @@ describe("computeWaitTimesSummary", () => {
 });
 
 describe("GET /api/airports/:code/wait-stats (route)", () => {
-  it("404s unknown airports (no fabricated stats)", async () => {
+  it("404s unknown airports with deploy-contract errors[] shape (no fabricated stats)", async () => {
     const res = await request(app).get("/api/airports/QQQ/wait-stats");
     expect(res.status).toBe(404);
-    expect(res.body).toEqual({ error: "Airport not found" });
+    expect(res.body).toEqual({ errors: [{ field: "code", message: "Airport not found: QQQ" }] });
   });
 
-  it("400s malformed airport codes", async () => {
+  it("404s malformed airport codes with the same deploy-contract shape", async () => {
     const res = await request(app).get("/api/airports/QQ/wait-stats");
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(404);
+    expect(res.body).toEqual({ errors: [{ field: "code", message: "Airport not found: QQ" }] });
   });
 
   it("returns deterministic aggregates for a seeded airport", async () => {
@@ -269,6 +270,25 @@ describe("GET /api/wait-times/summary (route)", () => {
     expect(qEmpty.sampleSize).toBe(0);
     expect(qEmpty.latestWaitMinutes).toBeNull();
     expect(qEmpty.trend.direction).toBeNull();
+  });
+
+  it("orders airports in canonical data-file order (deploy contract, not alphabetical)", async () => {
+    const res = await request(app).get("/api/wait-times/summary");
+    expect(res.status).toBe(200);
+    const codes = res.body.airports.map((a: { airport: string }) => a.airport);
+    // Seed file order (reconciled to deploy data/airports.json): JFK, SEA, LAX
+    // lead the canonical list; alphabetical order would put ATL first instead.
+    const jfk = codes.indexOf("JFK");
+    const sea = codes.indexOf("SEA");
+    const lax = codes.indexOf("LAX");
+    const atl = codes.indexOf("ATL");
+    expect(jfk).toBeGreaterThanOrEqual(0);
+    expect(sea).toBeGreaterThanOrEqual(0);
+    expect(lax).toBeGreaterThanOrEqual(0);
+    expect(atl).toBeGreaterThanOrEqual(0);
+    expect(jfk).toBeLessThan(lax);
+    expect(lax).toBeLessThan(atl);
+    expect(sea).toBeLessThan(lax);
   });
 
   it("serves repeat calls from cache with the same generatedAt", async () => {

@@ -9,8 +9,8 @@ param(
   [string]$Report = ""
 )
 $ErrorActionPreference = "Stop"
-$root = "D:\paperclip-data\instances\default\workspaces\50d35b5d-c5bf-4e6f-ab78-15a1008ada91"
-$api = "$root\packages\api"
+$root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+$api = Join-Path $root "packages\api"
 
 # tsx is hoisted to the workspace root by npm; resolve it from there.
 $tsxEntry = "$root\node_modules\tsx\dist\cli.mjs"

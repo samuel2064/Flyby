@@ -35,6 +35,7 @@ vi.mock("web-push", () => ({
 }));
 
 let airportId: string;
+let airportCode: string;
 let checkpointId: string;
 let checkpointName: string;
 
@@ -61,6 +62,7 @@ beforeAll(async () => {
   const airport = await prisma.airport.findFirst({ include: { checkpoints: { take: 1 } } });
   if (!airport) throw new Error("Seed data missing");
   airportId = airport.id;
+  airportCode = airport.code;
   checkpointId = airport.checkpoints[0].id;
   checkpointName = airport.checkpoints[0].name;
 });
@@ -347,7 +349,7 @@ describe("POST /api/notifications/send", () => {
     expect(sendNotificationMock).toHaveBeenCalledTimes(1);
 
     const payload = JSON.parse(sendNotificationMock.mock.calls[0][1]);
-    expect(payload.title).toContain("ATL");
+    expect(payload.title).toContain(airportCode);
     expect(payload.body).toContain("45 min wait");
     expect(payload.body).toContain("60 min");
   });

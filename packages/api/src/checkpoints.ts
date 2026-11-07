@@ -7,6 +7,7 @@ import { decodeToken } from "./auth";
 import { computeAccuracy, computeConsensus, VISIBLE_REPORT_WHERE } from "./waitTimeUtils";
 import { dispatchWaitTimeAlerts } from "./notifications";
 import { resolveCompatCheckpointId } from "./deployCompat";
+import { canonicalAirportCompare } from "./airportCanonicalOrder";
 import { validateUUID, validateReportedAt, validateMinutes, validateLineType, validateReportType, validateSource } from "./validation";
 
 // Rate limiting for reports
@@ -75,7 +76,7 @@ export const getCheckpoints = async (req: Request, res: Response) => {
         select: { code: true },
       });
       if (!airport) {
-        res.status(404).json({ error: "Airport not found" });
+        res.status(404).json({ errors: [{ field: "airport", message: `Airport not found: ${airportCode}` }] });
         return;
       }
     }
@@ -92,14 +93,13 @@ export const getCheckpoints = async (req: Request, res: Response) => {
     });
 
     if (isDeployCompat) {
-      // Deploy-compat response shape: {airport, code: [{airport, name}]}
-      // Sort: 'Main' checkpoint first (case-insensitive), then alphabetical
+      // Deploy-compat response shape (deploy server.js /api/checkpoints):
+      // {airport, checkpoints: [{airport, name}]} with checkpoints in
+      // data-file order (canonical airport order, then insertion order).
       const sorted = checkpoints.sort((a, b) => {
-        const aIsMain = a.name.toLowerCase() === "main";
-        const bIsMain = b.name.toLowerCase() === "main";
-        if (aIsMain && !bIsMain) return -1;
-        if (!aIsMain && bIsMain) return 1;
-        return a.name.localeCompare(b.name);
+        const byAirport = canonicalAirportCompare(a.airport, b.airport);
+        if (byAirport !== 0) return byAirport;
+        return a.createdAt.getTime() - b.createdAt.getTime() || a.name.localeCompare(b.name);
       });
       if (!airportCode) {
         res.status(400).json({ error: "airport parameter required for deploy-compat mode" });
@@ -107,7 +107,7 @@ export const getCheckpoints = async (req: Request, res: Response) => {
       }
       res.json({
         airport: airportCode,
-        code: sorted.map((cp) => ({
+        checkpoints: sorted.map((cp) => ({
           airport: cp.airport.code,
           name: cp.name,
         })),

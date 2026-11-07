@@ -1,17 +1,27 @@
 [
   {
-    "code": "ATL",
-    "name": "Hartsfield-Jackson Atlanta International Airport",
-    "city": "Atlanta",
-    "state": "GA",
+    "code": "JFK",
+    "name": "John F. Kennedy International",
+    "city": "New York",
+    "state": "NY",
     "country": "USA",
     "timezone": "America/New_York",
-    "latitude": 33.6407,
-    "longitude": -84.4230
+    "latitude": 40.6413,
+    "longitude": -73.7781
+  },
+  {
+    "code": "SEA",
+    "name": "Seattle-Tacoma International",
+    "city": "Seattle",
+    "state": "WA",
+    "country": "USA",
+    "timezone": "America/Los_Angeles",
+    "latitude": 47.4502,
+    "longitude": -122.3088
   },
   {
     "code": "LAX",
-    "name": "Los Angeles International Airport",
+    "name": "Los Angeles International",
     "city": "Los Angeles",
     "state": "CA",
     "country": "USA",
@@ -21,7 +31,7 @@
   },
   {
     "code": "ORD",
-    "name": "O'Hare International Airport",
+    "name": "O'Hare International",
     "city": "Chicago",
     "state": "IL",
     "country": "USA",
@@ -30,8 +40,28 @@
     "longitude": -87.9073
   },
   {
+    "code": "SFO",
+    "name": "San Francisco International",
+    "city": "San Francisco",
+    "state": "CA",
+    "country": "USA",
+    "timezone": "America/Los_Angeles",
+    "latitude": 37.6162,
+    "longitude": -122.3818
+  },
+  {
+    "code": "ATL",
+    "name": "Hartsfield-Jackson Atlanta International",
+    "city": "Atlanta",
+    "state": "GA",
+    "country": "USA",
+    "timezone": "America/New_York",
+    "latitude": 33.6407,
+    "longitude": -84.423
+  },
+  {
     "code": "DFW",
-    "name": "Dallas/Fort Worth International Airport",
+    "name": "Dallas/Fort Worth International",
     "city": "Dallas",
     "state": "TX",
     "country": "USA",
@@ -41,7 +71,7 @@
   },
   {
     "code": "DEN",
-    "name": "Denver International Airport",
+    "name": "Denver International",
     "city": "Denver",
     "state": "CO",
     "country": "USA",
@@ -50,38 +80,8 @@
     "longitude": -104.6732
   },
   {
-    "code": "JFK",
-    "name": "John F. Kennedy International Airport",
-    "city": "New York",
-    "state": "NY",
-    "country": "USA",
-    "timezone": "America/New_York",
-    "latitude": 40.6413,
-    "longitude": -73.7781
-  },
-  {
-    "code": "SFO",
-    "name": "San Francisco International Airport",
-    "city": "San Francisco",
-    "state": "CA",
-    "country": "USA",
-    "timezone": "America/Los_Angeles",
-    "latitude": 37.6162,
-    "longitude": -122.3818
-  },
-  {
-    "code": "SEA",
-    "name": "Seattle-Tacoma International Airport",
-    "city": "Seattle",
-    "state": "WA",
-    "country": "USA",
-    "timezone": "America/Los_Angeles",
-    "latitude": 47.4502,
-    "longitude": -122.3088
-  },
-  {
     "code": "LAS",
-    "name": "Harry Reid International Airport",
+    "name": "Harry Reid International",
     "city": "Las Vegas",
     "state": "NV",
     "country": "USA",
@@ -91,7 +91,7 @@
   },
   {
     "code": "MCO",
-    "name": "Orlando International Airport",
+    "name": "Orlando International",
     "city": "Orlando",
     "state": "FL",
     "country": "USA",
@@ -101,17 +101,17 @@
   },
   {
     "code": "CLT",
-    "name": "Charlotte Douglas International Airport",
+    "name": "Charlotte Douglas International",
     "city": "Charlotte",
     "state": "NC",
     "country": "USA",
     "timezone": "America/New_York",
-    "latitude": 35.2140,
-    "longitude": -80.9470
+    "latitude": 35.214,
+    "longitude": -80.947
   },
   {
     "code": "EWR",
-    "name": "Newark Liberty International Airport",
+    "name": "Newark Liberty International",
     "city": "Newark",
     "state": "NJ",
     "country": "USA",
@@ -121,17 +121,17 @@
   },
   {
     "code": "PHX",
-    "name": "Phoenix Sky Harbor International Airport",
+    "name": "Phoenix Sky Harbor International",
     "city": "Phoenix",
     "state": "AZ",
     "country": "USA",
     "timezone": "America/Phoenix",
-    "latitude": 33.4350,
-    "longitude": -111.9750
+    "latitude": 33.435,
+    "longitude": -111.975
   },
   {
     "code": "MIA",
-    "name": "Miami International Airport",
+    "name": "Miami International",
     "city": "Miami",
     "state": "FL",
     "country": "USA",
@@ -141,7 +141,7 @@
   },
   {
     "code": "IAH",
-    "name": "George Bush Intercontinental Airport",
+    "name": "George Bush Intercontinental",
     "city": "Houston",
     "state": "TX",
     "country": "USA",
@@ -151,7 +151,7 @@
   },
   {
     "code": "BOS",
-    "name": "Logan International Airport",
+    "name": "Logan International",
     "city": "Boston",
     "state": "MA",
     "country": "USA",
@@ -161,17 +161,17 @@
   },
   {
     "code": "MSP",
-    "name": "Minneapolis-Saint Paul International Airport",
+    "name": "Minneapolis-Saint Paul International",
     "city": "Minneapolis",
     "state": "MN",
     "country": "USA",
     "timezone": "America/Chicago",
     "latitude": 44.8847,
-    "longitude": -93.2160
+    "longitude": -93.216
   },
   {
     "code": "DTW",
-    "name": "Detroit Metropolitan Wayne County Airport",
+    "name": "Detroit Metropolitan Wayne County",
     "city": "Detroit",
     "state": "MI",
     "country": "USA",
@@ -181,7 +181,7 @@
   },
   {
     "code": "FLL",
-    "name": "Fort Lauderdale-Hollywood International Airport",
+    "name": "Fort Lauderdale-Hollywood International",
     "city": "Fort Lauderdale",
     "state": "FL",
     "country": "USA",
@@ -191,7 +191,7 @@
   },
   {
     "code": "PHL",
-    "name": "Philadelphia International Airport",
+    "name": "Philadelphia International",
     "city": "Philadelphia",
     "state": "PA",
     "country": "USA",
@@ -201,7 +201,7 @@
   },
   {
     "code": "BWI",
-    "name": "Baltimore/Washington International Thurgood Marshall Airport",
+    "name": "Baltimore/Washington International Thurgood Marshall",
     "city": "Baltimore",
     "state": "MD",
     "country": "USA",
@@ -211,7 +211,7 @@
   },
   {
     "code": "DCA",
-    "name": "Ronald Reagan Washington National Airport",
+    "name": "Ronald Reagan Washington National",
     "city": "Arlington",
     "state": "VA",
     "country": "USA",
@@ -221,7 +221,7 @@
   },
   {
     "code": "MDW",
-    "name": "Chicago Midway International Airport",
+    "name": "Chicago Midway International",
     "city": "Chicago",
     "state": "IL",
     "country": "USA",
@@ -231,17 +231,17 @@
   },
   {
     "code": "TPA",
-    "name": "Tampa International Airport",
+    "name": "Tampa International",
     "city": "Tampa",
     "state": "FL",
     "country": "USA",
     "timezone": "America/New_York",
-    "latitude": 27.9800,
+    "latitude": 27.98,
     "longitude": -82.5073
   },
   {
     "code": "SAN",
-    "name": "San Diego International Airport",
+    "name": "San Diego International",
     "city": "San Diego",
     "state": "CA",
     "country": "USA",
@@ -251,7 +251,7 @@
   },
   {
     "code": "SLC",
-    "name": "Salt Lake City International Airport",
+    "name": "Salt Lake City International",
     "city": "Salt Lake City",
     "state": "UT",
     "country": "USA",
@@ -261,7 +261,7 @@
   },
   {
     "code": "PDX",
-    "name": "Portland International Airport",
+    "name": "Portland International",
     "city": "Portland",
     "state": "OR",
     "country": "USA",
@@ -271,7 +271,7 @@
   },
   {
     "code": "STL",
-    "name": "St. Louis Lambert International Airport",
+    "name": "St. Louis Lambert International",
     "city": "St. Louis",
     "state": "MO",
     "country": "USA",
@@ -281,7 +281,7 @@
   },
   {
     "code": "CVG",
-    "name": "Cincinnati/Northern Kentucky International Airport",
+    "name": "Cincinnati/Northern Kentucky International",
     "city": "Cincinnati",
     "state": "OH",
     "country": "USA",
@@ -291,7 +291,7 @@
   },
   {
     "code": "RDU",
-    "name": "Raleigh-Durham International Airport",
+    "name": "Raleigh-Durham International",
     "city": "Raleigh",
     "state": "NC",
     "country": "USA",
@@ -301,7 +301,7 @@
   },
   {
     "code": "IND",
-    "name": "Indianapolis International Airport",
+    "name": "Indianapolis International",
     "city": "Indianapolis",
     "state": "IN",
     "country": "USA",
@@ -311,7 +311,7 @@
   },
   {
     "code": "AUS",
-    "name": "Austin-Bergstrom International Airport",
+    "name": "Austin-Bergstrom International",
     "city": "Austin",
     "state": "TX",
     "country": "USA",
@@ -331,7 +331,7 @@
   },
   {
     "code": "BNA",
-    "name": "Nashville International Airport",
+    "name": "Nashville International",
     "city": "Nashville",
     "state": "TN",
     "country": "USA",
@@ -341,7 +341,7 @@
   },
   {
     "code": "SMF",
-    "name": "Sacramento International Airport",
+    "name": "Sacramento International",
     "city": "Sacramento",
     "state": "CA",
     "country": "USA",
@@ -351,7 +351,7 @@
   },
   {
     "code": "MCI",
-    "name": "Kansas City International Airport",
+    "name": "Kansas City International",
     "city": "Kansas City",
     "state": "MO",
     "country": "USA",
@@ -361,7 +361,7 @@
   },
   {
     "code": "HNL",
-    "name": "Daniel K. Inouye International Airport",
+    "name": "Daniel K. Inouye International",
     "city": "Honolulu",
     "state": "HI",
     "country": "USA",
@@ -371,7 +371,7 @@
   },
   {
     "code": "OAK",
-    "name": "San Francisco Bay Oakland International Airport",
+    "name": "San Francisco Bay Oakland International",
     "city": "Oakland",
     "state": "CA",
     "country": "USA",
@@ -381,7 +381,7 @@
   },
   {
     "code": "MSY",
-    "name": "Louis Armstrong New Orleans International Airport",
+    "name": "Louis Armstrong New Orleans International",
     "city": "New Orleans",
     "state": "LA",
     "country": "USA",
@@ -391,7 +391,7 @@
   },
   {
     "code": "CLE",
-    "name": "Cleveland Hopkins International Airport",
+    "name": "Cleveland Hopkins International",
     "city": "Cleveland",
     "state": "OH",
     "country": "USA",
@@ -401,7 +401,7 @@
   },
   {
     "code": "PIT",
-    "name": "Pittsburgh International Airport",
+    "name": "Pittsburgh International",
     "city": "Pittsburgh",
     "state": "PA",
     "country": "USA",
@@ -411,7 +411,7 @@
   },
   {
     "code": "SJC",
-    "name": "San Jose International Airport",
+    "name": "San Jose International",
     "city": "San Jose",
     "state": "CA",
     "country": "USA",
@@ -421,17 +421,17 @@
   },
   {
     "code": "SAT",
-    "name": "San Antonio International Airport",
+    "name": "San Antonio International",
     "city": "San Antonio",
     "state": "TX",
     "country": "USA",
     "timezone": "America/Chicago",
     "latitude": 29.5326,
-    "longitude": -98.4720
+    "longitude": -98.472
   },
   {
     "code": "RSW",
-    "name": "Southwest Florida International Airport",
+    "name": "Southwest Florida International",
     "city": "Fort Myers",
     "state": "FL",
     "country": "USA",
@@ -441,7 +441,7 @@
   },
   {
     "code": "IAD",
-    "name": "Washington Dulles International Airport",
+    "name": "Washington Dulles International",
     "city": "Dulles",
     "state": "VA",
     "country": "USA",
@@ -451,7 +451,7 @@
   },
   {
     "code": "SNA",
-    "name": "John Wayne Airport",
+    "name": "John Wayne",
     "city": "Santa Ana",
     "state": "CA",
     "country": "USA",
@@ -461,7 +461,7 @@
   },
   {
     "code": "MKE",
-    "name": "General Mitchell International Airport",
+    "name": "General Mitchell International",
     "city": "Milwaukee",
     "state": "WI",
     "country": "USA",
@@ -471,7 +471,7 @@
   },
   {
     "code": "PBI",
-    "name": "Palm Beach International Airport",
+    "name": "Palm Beach International",
     "city": "West Palm Beach",
     "state": "FL",
     "country": "USA",
@@ -481,7 +481,7 @@
   },
   {
     "code": "RIC",
-    "name": "Richmond International Airport",
+    "name": "Richmond International",
     "city": "Richmond",
     "state": "VA",
     "country": "USA",
@@ -491,7 +491,7 @@
   },
   {
     "code": "BUF",
-    "name": "Buffalo Niagara International Airport",
+    "name": "Buffalo Niagara International",
     "city": "Buffalo",
     "state": "NY",
     "country": "USA",
@@ -501,7 +501,7 @@
   },
   {
     "code": "ONT",
-    "name": "Ontario International Airport",
+    "name": "Ontario International",
     "city": "Ontario",
     "state": "CA",
     "country": "USA",

@@ -95,7 +95,7 @@ export const flagReport = async (req: Request, res: Response) => {
   const id = req.params.id as string;
   const idValidation = validateUUID(id);
   if (!idValidation.valid) {
-    res.status(400).json({ error: idValidation.error });
+    res.status(404).json({ error: "Report not found" });
     return;
   }
 

@@ -189,6 +189,8 @@ describe("compat preferences", () => {
     expect(res.status).toBe(200);
     expect(res.body.enabled).toBe(true);
     expect(Array.isArray(res.body.airports)).toBe(true);
+    // Deploy byte-contract: exactly these three keys, no updatedAt on the wire
+    expect(Object.keys(res.body).sort()).toEqual(["airports", "enabled", "minWaitChange"]);
   });
 
   it("PUT /api/preferences merges and echoes", async () => {
@@ -259,10 +261,13 @@ describe("compat moderation (admin-keyed)", () => {
   it("queue + actions require an admin key (401 without)", async () => {
     const q = await request(app).get("/api/moderation/reports");
     expect(q.status).toBe(401);
+    expect(q.body).toEqual({ error: "Invalid or missing admin key" });
     const h = await request(app).post("/api/moderation/reports/rpt_x1/hide");
     expect(h.status).toBe(401);
+    expect(h.body).toEqual({ error: "Invalid or missing admin key" });
     const c = await request(app).post("/api/moderation/reports/rpt_x1/clear");
     expect(c.status).toBe(401);
+    expect(c.body).toEqual({ error: "Invalid or missing admin key" });
   });
 
   it("400s an invalid report id once admin auth passes", async () => {

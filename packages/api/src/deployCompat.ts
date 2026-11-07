@@ -4,6 +4,7 @@ import { prisma } from "./prisma";
 import { VISIBLE_REPORT_WHERE } from "./waitTimeUtils";
 import { errorTotal } from "./metrics";
 import { publishWaitTime, subscribeCheckpoint } from "./redis";
+import { canonicalAirportCompare } from "./airportCanonicalOrder";
 
 // Deploy-compat surface (TIR-339 / M1): the endpoints the live traveler web
 // and QA probes call verbatim, served by the monorepo. Contract is the deploy
@@ -378,9 +379,12 @@ export const compatGetAirportByCode = async (req: Request, res: Response) => {
 };
 
 // --- GET /api/checkpoints[?airport=] (deploy-compat flat pairs) ---------------
-// Deploy contract: {airport, code:[{airport,name}]} style flat pairs,
-// launch-5 have 'Main' FIRST. The native getCheckpointsByAirportCode returns
-// richer objects; this compat route returns the flat shape.
+// Deploy contract (apps/api/server.js /api/checkpoints): with ?airport=CODE|apt-id
+// -> {airport, checkpoints:[{airport,name}]} with checkpoints in data-file order;
+// unknown airport -> 404 {errors:[{field:'airport',message:...}]}; without the
+// param -> {checkpoints:[...]} flat over every airport in canonical order.
+// The native getCheckpointsByAirportCode returns richer objects; this compat
+// route returns the flat shape.
 export const compatListCheckpointsByAirport = async (req: Request, res: Response) => {
   const raw = (req.query.airport ?? req.query.airportId) as string | undefined;
   let code: string | null = null;
@@ -391,20 +395,15 @@ export const compatListCheckpointsByAirport = async (req: Request, res: Response
       : trimmed.toUpperCase();
   }
 
-  // Deploy-compat single-airport mode requires airport parameter
   if (code) {
     const airport = await prisma.airport.findUnique({
       where: { code },
       select: { code: true },
     });
     if (!airport) {
-      res.status(404).json({ error: "Airport not found" });
+      res.status(404).json({ errors: [{ field: "airport", message: `Airport not found: ${code}` }] });
       return;
     }
-  } else if (raw === undefined) {
-    // No airport param provided - this is an error for deploy-compat single-airport mode
-    res.status(400).json({ error: "airport parameter required for deploy-compat mode" });
-    return;
   }
 
   try {
@@ -412,42 +411,30 @@ export const compatListCheckpointsByAirport = async (req: Request, res: Response
     const checkpoints = await prisma.checkpoint.findMany({
       where,
       include: { airport: { select: { code: true } } },
-      orderBy: [
-        { name: "asc" }, // secondary
-      ],
+      orderBy: [{ createdAt: "asc" }, { name: "asc" }],
       take: 500,
     });
-
-    // Sort: 'Main' checkpoint first (case-insensitive), then alphabetical
-    const sorted = checkpoints.sort((a, b) => {
-      const aIsMain = a.name.toLowerCase() === "main";
-      const bIsMain = b.name.toLowerCase() === "main";
-      if (aIsMain && !bIsMain) return -1;
-      if (!aIsMain && bIsMain) return 1;
-      return a.name.localeCompare(b.name);
+    // Deploy iterates airports in canonical data-file order (and each airport's
+    // checkpoints in data-file order, which seed/migration insertion preserves).
+    checkpoints.sort((a, b) => {
+      const byAirport = canonicalAirportCompare(a.airport, b.airport);
+      if (byAirport !== 0) return byAirport;
+      return a.createdAt.getTime() - b.createdAt.getTime() || a.name.localeCompare(b.name);
     });
 
     if (code) {
-      // Single airport: {airport, code: [{airport, name}]}
       res.json({
         airport: code,
-        code: sorted.map((cp) => ({
+        checkpoints: checkpoints.map((cp) => ({
           airport: cp.airport.code,
           name: cp.name,
         })),
       });
     } else {
-      // All airports: group by airport code (not used in current tests but kept for completeness)
-      const grouped = new Map<string, Array<{ airport: string; name: string }>>();
-      for (const cp of sorted) {
-        const list = grouped.get(cp.airport.code) ?? [];
-        list.push({ airport: cp.airport.code, name: cp.name });
-        grouped.set(cp.airport.code, list);
-      }
       res.json({
-        airports: Array.from(grouped.entries()).map(([airport, code]) => ({
-          airport,
-          code,
+        checkpoints: checkpoints.map((cp) => ({
+          airport: cp.airport.code,
+          name: cp.name,
         })),
       });
     }
@@ -790,11 +777,12 @@ export const compatDeleteSubscription = async (req: Request, res: Response) => {
 // --- preferences (singleton globals + per-user, shape-parity) ----------------
 // Deploy-era global object stays process-local by design (QA relies on that
 // contract only); per-user rows persist via NotificationPreference.
+// Deploy's singleton shape is exactly {enabled, airports, minWaitChange} - no
+// updatedAt on the wire (byte-parity, M3).
 const compatGlobalPrefs = {
   enabled: true,
   airports: [] as string[],
   minWaitChange: 5,
-  updatedAt: new Date().toISOString(),
 };
 
 export const compatGetPrefs = (_req: Request, res: Response) => {
@@ -802,7 +790,7 @@ export const compatGetPrefs = (_req: Request, res: Response) => {
 };
 
 export const compatPutPrefs = (req: Request, res: Response) => {
-  Object.assign(compatGlobalPrefs, req.body ?? {}, { updatedAt: new Date().toISOString() });
+  Object.assign(compatGlobalPrefs, req.body ?? {});
   res.json(compatGlobalPrefs);
 };
 
@@ -980,13 +968,13 @@ function requireCompatAdmin(req: Request, res: Response): boolean {
   }
   const offered = req.get("X-Admin-Key") ?? (req.get("Authorization") ?? "").replace(/^Bearer /, "");
   if (!offered) {
-    res.status(401).json({ error: "Unauthorized" });
+    res.status(401).json({ error: "Invalid or missing admin key" });
     return false;
   }
   const a = crypto.createHash("sha256").update(offered).digest();
   const b = crypto.createHash("sha256").update(ADMIN_KEY).digest();
   if (!crypto.timingSafeEqual(a, b)) {
-    res.status(401).json({ error: "Unauthorized" });
+    res.status(401).json({ error: "Invalid or missing admin key" });
     return false;
   }
   return true;

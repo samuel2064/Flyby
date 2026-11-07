@@ -47,8 +47,8 @@ const CORPUS = [
   { label: "predict with ck-slug id resolves or 404s canonically", method: "GET", path: "/api/checkpoints/ck-jfk-main/predict", expectStatus: [200, 404] },
   { label: "summary aggregation", method: "GET", path: "/api/wait-times/summary", expectStatus: 200 },
   { label: "per-airport wait-stats", method: "GET", path: "/api/airports/JFK/wait-stats", expectStatus: 200 },
-  { label: "wait-stats unknown code 404", method: "GET", path: "/api/airports/QQQ/wait-stats", expectStatus: 404 },
-  { label: "wait-stats malformed code 400", method: "GET", path: "/api/airports/Q1/wait-stats", expectStatus: 400 },
+  { label: "wait-stats unknown code 404", method: "GET", path: "/api/airports/QQQ/wait-stats", expectStatus: 404, contract: (j) => Array.isArray(j?.errors) && j.errors.length > 0 },
+  { label: "wait-stats malformed code -> 404 deploy-contract", method: "GET", path: "/api/airports/Q1/wait-stats", expectStatus: 404, contract: (j) => Array.isArray(j?.errors) && j.errors.length > 0 },
   {
     label: "subscriptions list redacted on both sides",
     method: "GET",
@@ -176,7 +176,10 @@ async function main() {
       row.statusesMatch = (NO_PROD || cand.status === prod.status) && expected.includes(cand.status);
       row.byteMatch = prod ? prod.text === cand.text : null;
       row.contractOk = probe.contract ? Boolean(probe.contract(cand.json)) : true;
-      row.approved = approved.find((p) => new RegExp(p.routePattern, "i").test(probe.path)) ?? null;
+      // Approved-divergence patterns match the route path without its query
+      // string (patterns are written against bare paths like ^/api/wait-times$).
+      const barePath = probe.path.split("?")[0];
+      row.approved = approved.find((p) => new RegExp(p.routePattern, "i").test(barePath)) ?? null;
 
       if (!row.statusesMatch || !row.contractOk || (FULL && prod && !row.byteMatch)) {
         row.fail = true;

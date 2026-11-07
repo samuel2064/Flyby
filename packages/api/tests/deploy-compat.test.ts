@@ -323,30 +323,31 @@ describe("seed-style checkpoint names resolve through the compat surface (TIR-33
 });
 
   describe("GET /api/checkpoints?airport= (deploy-compat flat pairs)", () => {
-    it("returns flat pairs with Main checkpoint first when present", async () => {
+    it("returns flat pairs under the checkpoints key in data-file order", async () => {
       const res = await request(app).get(`/api/checkpoints?airport=${COMP_CODE}`);
       expect(res.status).toBe(200);
       expect(res.body).toHaveProperty("airport", COMP_CODE);
-      expect(Array.isArray(res.body.code)).toBe(true);
-      expect(res.body.code.length).toBeGreaterThan(0);
-      // COMP_CODE has a "Main" checkpoint - should be first
-      expect(res.body.code[0]).toMatchObject({ airport: COMP_CODE, name: "Main" });
+      expect(Array.isArray(res.body.checkpoints)).toBe(true);
+      expect(res.body.checkpoints.length).toBeGreaterThan(0);
+      // Deploy contract key is `checkpoints`, not `code`
+      expect(res.body).not.toHaveProperty("code");
+      // COMP_CODE has a "Main" checkpoint - seeded first, so data order puts it first
+      expect(res.body.checkpoints[0]).toMatchObject({ airport: COMP_CODE, name: "Main" });
       // All entries should have airport and name only
-      for (const entry of res.body.code) {
+      for (const entry of res.body.checkpoints) {
         expect(entry).toHaveProperty("airport");
         expect(entry).toHaveProperty("name");
         expect(Object.keys(entry)).toHaveLength(2);
       }
     });
 
-    it("returns flat pairs sorted alphabetically when no Main checkpoint", async () => {
+    it("returns flat pairs in insertion (data-file) order", async () => {
       const res = await request(app).get(`/api/checkpoints?airport=${COMP_FULL}`);
       expect(res.status).toBe(200);
       expect(res.body).toHaveProperty("airport", COMP_FULL);
-      expect(Array.isArray(res.body.code)).toBe(true);
-      expect(res.body.code.length).toBeGreaterThan(0);
-      // COMP_FULL has "Terminal 4 Security" - no Main, so alphabetical
-      expect(res.body.code[0]).toMatchObject({ airport: COMP_FULL, name: "Terminal 4 Security" });
+      expect(Array.isArray(res.body.checkpoints)).toBe(true);
+      expect(res.body.checkpoints.length).toBeGreaterThan(0);
+      expect(res.body.checkpoints[0]).toMatchObject({ airport: COMP_FULL, name: "Terminal 4 Security" });
     });
 
     it("accepts apt- prefixed airportId", async () => {
@@ -355,10 +356,10 @@ describe("seed-style checkpoint names resolve through the compat surface (TIR-33
       expect(res.body.airport).toBe(COMP_CODE);
     });
 
-    it("404s unknown airport", async () => {
+    it("404s unknown airport with deploy-contract errors[] shape", async () => {
       const res = await request(app).get("/api/checkpoints?airport=ZZZ");
       expect(res.status).toBe(404);
-      expect(res.body).toEqual({ error: "Airport not found" });
+      expect(res.body).toEqual({ errors: [{ field: "airport", message: "Airport not found: ZZZ" }] });
     });
   });
 
@@ -596,21 +597,26 @@ describe("GET /api/compat/checkpoints (deploy-compat flat pairs)", () => {
     const res = await request(app).get(`/api/compat/checkpoints?airport=${COMP_CODE}`);
     expect(res.status).toBe(200);
     expect(res.body).toHaveProperty("airport", COMP_CODE);
-    expect(Array.isArray(res.body.code)).toBe(true);
-    expect(res.body.code.length).toBeGreaterThan(0);
-    expect(res.body.code[0]).toMatchObject({ airport: COMP_CODE, name: "Main" });
+    expect(Array.isArray(res.body.checkpoints)).toBe(true);
+    expect(res.body.checkpoints.length).toBeGreaterThan(0);
+    expect(res.body.checkpoints[0]).toMatchObject({ airport: COMP_CODE, name: "Main" });
   });
 
-  it("404s unknown airport", async () => {
+  it("404s unknown airport with deploy-contract errors[] shape", async () => {
     const res = await request(app).get("/api/compat/checkpoints?airport=ZZZ");
     expect(res.status).toBe(404);
-    expect(res.body).toEqual({ error: "Airport not found" });
+    expect(res.body).toEqual({ errors: [{ field: "airport", message: "Airport not found: ZZZ" }] });
   });
 
-  it("400s when airport param missing", async () => {
+  it("returns the flat all-airports list when airport param missing (deploy contract)", async () => {
     const res = await request(app).get("/api/compat/checkpoints");
-    expect(res.status).toBe(400);
-    expect(res.body.error).toContain("airport parameter required");
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body.checkpoints)).toBe(true);
+    expect(res.body.checkpoints.length).toBeGreaterThan(0);
+    for (const entry of res.body.checkpoints) {
+      expect(entry).toHaveProperty("airport");
+      expect(entry).toHaveProperty("name");
+    }
   });
 });
 

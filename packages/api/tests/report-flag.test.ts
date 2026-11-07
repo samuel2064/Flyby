@@ -68,9 +68,10 @@ afterAll(async () => {
 });
 
 describe("POST /api/reports/:id/flag", () => {
-  it("rejects malformed report ids with 400", async () => {
+  it("returns 404 for malformed report ids (deploy-contract parity)", async () => {
     const res = await flag("not-a-uuid", newSessionId());
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(404);
+    expect(res.body.error).toBe("Report not found");
   });
 
   it("returns 404 for a well-formed id that does not exist", async () => {

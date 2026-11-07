@@ -3,6 +3,7 @@ import { prisma } from "./prisma";
 import { VISIBLE_REPORT_WHERE } from "./waitTimeUtils";
 import { errorTotal } from "./metrics";
 import { computeWaitStats, computeWaitTimesSummary } from "./waitStats";
+import { canonicalAirportCompare } from "./airportCanonicalOrder";
 
 // Dashboard data endpoints (TIR-336):
 //   GET /api/airports/:code/wait-stats - per-airport aggregate (overall avg +
@@ -31,7 +32,7 @@ export const getAirportWaitStats = async (req: Request, res: Response) => {
     .trim()
     .toUpperCase();
   if (!/^[A-Z]{3}$/.test(code)) {
-    res.status(400).json({ error: "Invalid airport code. Must be a 3-letter IATA code." });
+    res.status(404).json({ errors: [{ field: "code", message: `Airport not found: ${code}` }] });
     return;
   }
   try {
@@ -40,7 +41,7 @@ export const getAirportWaitStats = async (req: Request, res: Response) => {
       select: { id: true, code: true, name: true, timezone: true },
     });
     if (!airport) {
-      res.status(404).json({ error: "Airport not found" });
+      res.status(404).json({ errors: [{ field: "code", message: `Airport not found: ${code}` }] });
       return;
     }
 
@@ -82,9 +83,11 @@ export const getWaitTimesSummary = async (_req: Request, res: Response) => {
   }
   try {
     const airports = await prisma.airport.findMany({
-      select: { id: true, code: true, name: true, timezone: true },
-      orderBy: { code: "asc" },
+      select: { code: true, name: true, timezone: true },
     });
+    // Deploy-contract ordering: canonical data-file order, not alphabetical
+    // (deploy /api/wait-times/summary iterates its data file in order).
+    airports.sort(canonicalAirportCompare);
     const rows = await prisma.waitTime.findMany({
       where: VISIBLE_REPORT_WHERE,
       select: {
