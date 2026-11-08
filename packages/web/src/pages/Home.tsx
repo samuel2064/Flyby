@@ -7,6 +7,7 @@ import { useSse } from '../hooks/useSse';
 import { useRefreshInterval } from '../hooks/useRefreshInterval';
 import { SkeletonCard } from '../components/Skeleton';
 import ReportModal from '../components/ReportModal';
+import { laneLabel, laneBadgeClass } from '../lib/lane';
 import { ReportSheet } from '../components/ReportSheet';
 import { DEFAULT_AIRPORT } from '../data/airports';
 
@@ -20,6 +21,7 @@ interface Checkpoint {
   latestWaitTimeMinutes: number | null;
   latestReportedAt: string | null;
   source: string | null;
+  reportType?: string | null;
 }
 
 interface SseUpdate {
@@ -89,12 +91,12 @@ export default function Home() {
   }, [refetch]);
 
   // Submit a queued report to the API
-  const submitReport = useCallback(async ({ checkpointId, minutes, source, reportedAt }: { checkpointId: string; minutes: number; source: string; reportedAt: string }): Promise<boolean> => {
+  const submitReport = useCallback(async ({ checkpointId, minutes, source, reportType, reportedAt }: { checkpointId: string; minutes: number; source: string; reportType?: string; reportedAt: string }): Promise<boolean> => {
     try {
       const res = await fetch(apiUrl(`/api/checkpoints/${checkpointId}/wait-times`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ minutes, source, reportedAt }),
+        body: JSON.stringify({ minutes, source, reportType, reportedAt }),
       });
       return res.ok;
     } catch {
@@ -269,7 +271,14 @@ export default function Home() {
                           <p className={`text-2xl font-bold ${getWaitColor(cp.latestWaitTimeMinutes)}`}>
                             {cp.latestWaitTimeMinutes !== null ? `${cp.latestWaitTimeMinutes} min` : '—'}
                           </p>
-                          <p className="text-xs text-gray-400">{cp.source || 'unknown'}</p>
+                          <p className="text-xs text-gray-400">
+                            {cp.source || 'unknown'}
+                            {laneLabel(cp.reportType) && (
+                              <span className={`ml-1 px-1.5 py-0.5 rounded font-medium ${laneBadgeClass(cp.reportType)}`} data-testid="lane-badge">
+                                {laneLabel(cp.reportType)}
+                              </span>
+                            )}
+                          </p>
                         </div>
                       </div>
                       <div className="flex items-center justify-between mt-3">

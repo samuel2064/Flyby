@@ -5,6 +5,7 @@ import { VISIBLE_REPORT_WHERE } from "./waitTimeUtils";
 import { errorTotal } from "./metrics";
 import { publishWaitTime, subscribeCheckpoint } from "./redis";
 import { canonicalAirportCompare } from "./airportCanonicalOrder";
+import { validateReportType } from "./validation";
 
 // Deploy-compat surface (TIR-339 / M1): the endpoints the live traveler web
 // and QA probes call verbatim, served by the monorepo. Contract is the deploy
@@ -82,6 +83,7 @@ export const getWaitTimesCompat = async (req: Request, res: Response) => {
         id: true,
         minutes: true,
         reportedAt: true,
+        reportType: true,
         checkpoint: { select: { name: true, airport: { select: { code: true } } } },
       },
     });
@@ -91,6 +93,7 @@ export const getWaitTimesCompat = async (req: Request, res: Response) => {
         airport: r.checkpoint.airport.code,
         checkpoint: r.checkpoint.name,
         waitMinutes: r.minutes,
+        reportType: r.reportType ?? "standard",
         updatedAt: r.reportedAt.toISOString(),
       })),
     );
@@ -102,10 +105,12 @@ export const getWaitTimesCompat = async (req: Request, res: Response) => {
 };
 
 // --- POST /api/wait-times (+ /api/wait-times/report alias) -------------------
-// Body: {airport, checkpoint, waitMinutes | waitTimeMinutes | minutes}; the
-// checkpoint resolves by name against the airport's checkpoints (falls back
-// to the airport's "Main" checkpoint if a free-form name is supplied - the
-// prod data shape). Only *reportable* values are persisted.
+// Body: {airport, checkpoint, waitMinutes | waitTimeMinutes | minutes,
+// reportType?}; the checkpoint resolves by name against the airport's
+// checkpoints (falls back to the airport's "Main" checkpoint if a free-form
+// name is supplied - the prod data shape). Only *reportable* values are
+// persisted. reportType (standard | preclear | clear) marks the lane the
+// traveler stood in (TIR-367): omit it and the row stays "standard".
 export const postWaitTimeCompat = async (req: Request, res: Response) => {
   const body = req.body ?? {};
   const waitMinutesValue =
@@ -126,6 +131,17 @@ export const postWaitTimeCompat = async (req: Request, res: Response) => {
     waitMinutesValue > 300
   ) {
     errors.push({ field: "waitMinutes", message: "waitMinutes must be a positive integer (1-300)" });
+  }
+  // TIR-367: optional lane discriminator. Omitted/null keeps the deploy-era
+  // default "standard"; a provided value must be in the documented vocabulary.
+  let reportType = "standard";
+  if (body.reportType !== undefined && body.reportType !== null) {
+    const laneValidation = validateReportType(body.reportType);
+    if (!laneValidation.valid) {
+      errors.push({ field: "reportType", message: laneValidation.error });
+    } else {
+      reportType = laneValidation.type;
+    }
   }
   if (errors.length > 0) {
     res.status(400).json({ errors });
@@ -172,7 +188,7 @@ export const postWaitTimeCompat = async (req: Request, res: Response) => {
         checkpointId: checkpoint.id,
         minutes: Math.round(waitMinutesValue as number),
         source: "crowd",
-        reportType: "standard",
+        reportType,
         reportedAt: receivedAt,
       },
     });
@@ -192,6 +208,7 @@ export const postWaitTimeCompat = async (req: Request, res: Response) => {
       airport: airportCode,
       checkpoint: checkpoint.name,
       waitMinutes: waitTime.minutes,
+      reportType: waitTime.reportType,
       receivedAt: receivedAt.toISOString(),
     });
   } catch (err) {

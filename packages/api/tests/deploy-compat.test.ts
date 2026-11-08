@@ -647,3 +647,69 @@ describe("GET /api/compat/checkpoints/:id/history (deploy-compat window/bucket)"
     expect(res.status).toBe(404);
   });
 });
+
+describe("reportType lane discriminator on the compat surface (TIR-367)", () => {
+  it("GET rows carry the reportType field with the stored lane value", async () => {
+    await prisma.waitTime.create({
+      data: { checkpointId: fullCpId, minutes: 9, source: "crowd", reportType: "preclear", reportedAt: new Date() },
+    });
+    const res = await request(app).get(`/api/wait-times?airport=${COMP_FULL}`);
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveLength(1);
+    expect(res.body[0].reportType).toBe("preclear");
+  });
+
+  it("GET rows surface standard (not null) for default-lane rows", async () => {
+    await prisma.waitTime.create({
+      data: { checkpointId: fullCpId, minutes: 8, source: "crowd", reportedAt: new Date() },
+    });
+    const res = await request(app).get(`/api/wait-times?airport=${COMP_FULL}`);
+    expect(res.status).toBe(200);
+    expect(res.body[0].reportType).toBe("standard");
+  });
+
+  it("POST persists an expedited lane (preclear) and echoes it in the 201 body", async () => {
+    const res = await request(app)
+      .post("/api/wait-times")
+      .set({ "X-User-Id": "cmp-lane-1" })
+      .send({ airport: COMP_FULL, checkpoint: "Terminal 4 Security", waitMinutes: 14, reportType: "preclear" });
+    expect(res.status).toBe(201);
+    expect(res.body.reportType).toBe("preclear");
+
+    const stored = await prisma.waitTime.findFirst({ where: { checkpointId: fullCpId, minutes: 14 } });
+    expect(stored?.reportType).toBe("preclear");
+  });
+
+  it("POST persists the clear lane too", async () => {
+    const res = await request(app)
+      .post("/api/wait-times")
+      .set({ "X-User-Id": "cmp-lane-2" })
+      .send({ airport: COMP_FULL, checkpoint: "Terminal 4 Security", waitMinutes: 7, reportType: "clear" });
+    expect(res.status).toBe(201);
+    expect(res.body.reportType).toBe("clear");
+    const stored = await prisma.waitTime.findFirst({ where: { checkpointId: fullCpId, minutes: 7 } });
+    expect(stored?.reportType).toBe("clear");
+  });
+
+  it("POST rejects an unknown lane with the deploy errors[] 400 shape", async () => {
+    const res = await request(app)
+      .post("/api/wait-times")
+      .set({ "X-User-Id": "cmp-lane-3" })
+      .send({ airport: COMP_FULL, checkpoint: "Terminal 4 Security", waitMinutes: 5, reportType: "precheck" });
+    expect(res.status).toBe(400);
+    expect(Array.isArray(res.body.errors)).toBe(true);
+    expect(res.body.errors[0]).toMatchObject({ field: "reportType" });
+    expect(res.body.errors[0].message).toContain("preclear");
+  });
+
+  it("POST treats explicit null reportType as omitted (deploy-era default)", async () => {
+    const res = await request(app)
+      .post("/api/wait-times")
+      .set({ "X-User-Id": "cmp-lane-4" })
+      .send({ airport: COMP_FULL, checkpoint: "Terminal 4 Security", waitMinutes: 6, reportType: null });
+    expect(res.status).toBe(201);
+    expect(res.body.reportType).toBe("standard");
+    const stored = await prisma.waitTime.findFirst({ where: { checkpointId: fullCpId, minutes: 6 } });
+    expect(stored?.reportType).toBe("standard");
+  });
+});

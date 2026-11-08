@@ -13,6 +13,9 @@ interface PendingReport {
   checkpointId: string;
   minutes: number;
   source: string;
+  // Optional lane discriminator (TIR-367): "preclear" | "clear" when the
+  // traveler stood in an expedited lane; omitted = standard.
+  reportType?: string;
   timestamp: number;
   reportedAt: string;
   retryCount?: number;

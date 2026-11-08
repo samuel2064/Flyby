@@ -2,6 +2,7 @@ export interface WaitTime {
   airport: string
   checkpoint: string
   waitMinutes: number
+  reportType?: string | null
   updatedAt: string
 }
 
@@ -17,6 +18,7 @@ export interface ReportSubmission {
   airport: string
   checkpoint: string
   waitMinutes: number
+  reportType?: string
   reporter?: string
 }
 
@@ -25,6 +27,7 @@ export interface ReportConfirmation {
   airport: string
   checkpoint: string
   waitMinutes: number
+  reportType?: string
   receivedAt: string
 }
 

@@ -276,3 +276,60 @@ describe("offlineQueue library", () => {
     });
   });
 });
+describe("reportType lane persistence in the offline queue (TIR-367)", () => {
+  let offlineQueue: any;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    vi.resetModules();
+    offlineQueue = await import("../src/lib/offlineQueue");
+  });
+
+  it("persists an expedited lane with the queued report", async () => {
+    await offlineQueue.addReportToQueue({
+      checkpointId: "cp-lane-1",
+      minutes: 18,
+      source: "crowd",
+      reportType: "preclear",
+      reportedAt: "2026-11-08T10:00:00Z",
+    });
+    const pending = await offlineQueue.getPendingReports();
+    const row = pending.find((r: any) => r.checkpointId === "cp-lane-1");
+    expect(row).toBeDefined();
+    expect(row.reportType).toBe("preclear");
+  });
+
+  it("omits the field entirely for standard lanes (deploy-era wire default)", async () => {
+    await offlineQueue.addReportToQueue({
+      checkpointId: "cp-lane-2",
+      minutes: 12,
+      source: "crowd",
+      reportedAt: "2026-11-08T10:05:00Z",
+    });
+    const pending = await offlineQueue.getPendingReports();
+    const row = pending.find((r: any) => r.checkpointId === "cp-lane-2");
+    expect(row).toBeDefined();
+    expect(row.reportType).toBeUndefined();
+  });
+
+  it("preserves the lane through the dedupe window rejection (same checkpoint+window)", async () => {
+    const first = await offlineQueue.addReportToQueue({
+      checkpointId: "cp-lane-3",
+      minutes: 10,
+      source: "crowd",
+      reportType: "clear",
+      reportedAt: "2026-11-08T10:10:00Z",
+    });
+    const second = await offlineQueue.addReportToQueue({
+      checkpointId: "cp-lane-3",
+      minutes: 20,
+      source: "crowd",
+      reportedAt: "2026-11-08T10:12:00Z",
+    });
+    expect(first.success).toBe(true);
+    expect(second.deduped).toBe(true);
+    const pending = await offlineQueue.getPendingReports();
+    const row = pending.find((r: any) => r.checkpointId === "cp-lane-3");
+    expect(row.reportType).toBe("clear");
+  });
+});

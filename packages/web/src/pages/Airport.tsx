@@ -160,12 +160,12 @@ export default function Airport() {
   }, [sseData, data, refetch, forecastsRefetch]);
 
   // Submit a queued report to the API
-  const submitReport = useCallback(async ({ checkpointId, minutes, source, reportedAt }: { checkpointId: string; minutes: number; source: string; reportedAt: string }): Promise<boolean> => {
+  const submitReport = useCallback(async ({ checkpointId, minutes, source, reportType, reportedAt }: { checkpointId: string; minutes: number; source: string; reportType?: string; reportedAt: string }): Promise<boolean> => {
     try {
       const res = await fetch(apiUrl(`/api/checkpoints/${checkpointId}/wait-times`), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ minutes, source, reportedAt }),
+        body: JSON.stringify({ minutes, source, reportType, reportedAt }),
       });
       return res.ok;
     } catch {

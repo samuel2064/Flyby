@@ -12,6 +12,7 @@ export interface SyncedReport {
   checkpointId: string;
   minutes: number;
   source: string;
+  reportType?: string;
   reportedAt: string;
 }
 
@@ -70,6 +71,7 @@ export function useOfflineQueue() {
           checkpointId: report.checkpointId,
           minutes: report.minutes,
           source: report.source,
+          ...(report.reportType !== undefined ? { reportType: report.reportType } : {}),
           reportedAt: report.reportedAt,
         });
         if (success) {
@@ -105,29 +107,38 @@ export function useOfflineQueue() {
   }, [isOnline, loadPendingCount]);
 
   // Queue a report for later submission
-  const queueReport = useCallback(async (checkpointId: string, minutes: number, source: string): Promise<boolean> => {
-    try {
-      const result = await addReportToQueue({ checkpointId, minutes, source, reportedAt: new Date().toISOString() });
+  const queueReport = useCallback(
+    async (checkpointId: string, minutes: number, source: string, reportType?: string): Promise<boolean> => {
+      try {
+        const result = await addReportToQueue({
+          checkpointId,
+          minutes,
+          source,
+          ...(reportType !== undefined ? { reportType } : {}),
+          reportedAt: new Date().toISOString(),
+        });
 
-      // Register background sync when a report is queued (browser support required)
-      if ('serviceWorker' in navigator && 'SyncManager' in window) {
-        try {
-          const registration = await navigator.serviceWorker.ready;
-          // SyncManager registration is not in standard lib.dom.d.ts yet
-          const syncManager = registration as unknown as { sync?: { register: (tag: string) => Promise<void> } };
-          await syncManager.sync?.register('sync-reports');
-        } catch (syncError) {
-          console.warn('Background sync registration failed:', syncError);
+        // Register background sync when a report is queued (browser support required)
+        if ('serviceWorker' in navigator && 'SyncManager' in window) {
+          try {
+            const registration = await navigator.serviceWorker.ready;
+            // SyncManager registration is not in standard lib.dom.d.ts yet
+            const syncManager = registration as unknown as { sync?: { register: (tag: string) => Promise<void> } };
+            await syncManager.sync?.register('sync-reports');
+          } catch (syncError) {
+            console.warn('Background sync registration failed:', syncError);
+          }
         }
-      }
 
-      await loadPendingCount();
-      return result.success || result.deduped;
-    } catch (error) {
-      console.error('Failed to queue report:', error);
-      return false;
-    }
-  }, [loadPendingCount]);
+        await loadPendingCount();
+        return result.success || result.deduped;
+      } catch (error) {
+        console.error('Failed to queue report:', error);
+        return false;
+      }
+    },
+    [loadPendingCount],
+  );
 
   return {
     isOnline,

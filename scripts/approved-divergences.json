@@ -11,7 +11,7 @@
     },
     {
       "routePattern": "^/api/wait-times$",
-      "note": "Monorepo's compat route added in M1; shape mirrored exactly from deploy. Wrapping differs from the native monorepo GET /api/wait-times didn't exist pre-M1. Row population is live-data dependent (a fresh candidate DB legitimately serves fewer rows than prod)."
+      "note": "Monorepo's compat route added in M1; shape mirrored exactly from deploy. Wrapping differs from the native monorepo GET /api/wait-times didn't exist pre-M1. Row population is live-data dependent (a fresh candidate DB legitimately serves fewer rows). 2026-11-08 (TIR-367): rows additionally carry reportType (standard|preclear|clear) - the lane discriminator the deploy repo never serialized; deploy-era clients ignore unknown fields, QA retargets to contract."
     },
     {
       "routePattern": "^/api/health$",

@@ -3,6 +3,7 @@ import { submitWaitTimeReport } from '../api/waitTimes'
 import { checkpointOptions } from '../data/airports'
 import { canSubmitReport, effectiveCheckpointPick } from '../lib/reportCheckpoint'
 import { extractRateLimitSeconds, formatWaitMessage } from '../lib/rateLimitFeedback'
+import { LANE_TYPES, type LaneType } from '../lib/lane'
 import type { WaitLevel } from '../api/types'
 import { waitLevel } from '../api/types'
 
@@ -19,6 +20,13 @@ interface ReportSheetProps {
 
 const WAIT_OPTIONS: number[] = [5, 10, 15, 20, 30, 45, 60]
 
+// Traveler-facing label per stored lane value; "standard" reads as "Standard".
+const LANE_BUTTON_LABELS: Record<LaneType, string> = {
+  standard: 'Standard',
+  preclear: 'TSA PreCheck',
+  clear: 'CLEAR',
+}
+
 export function ReportSheet({
   open,
   airportCode,
@@ -29,6 +37,7 @@ export function ReportSheet({
   const options = checkpointOptions(airportCode)
   const [pickedCheckpoint, setPickedCheckpoint] = useState<string>('')
   const [minutes, setMinutes] = useState<number>(15)
+  const [lane, setLane] = useState<LaneType>('standard')
   const [submitting, setSubmitting] = useState(false)
   const [submitted, setSubmitted] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -67,6 +76,9 @@ export function ReportSheet({
         airport: airportCode,
         checkpoint: activeCheckpoint,
         waitMinutes: minutes,
+        // Standard lanes stay off the wire (deploy-era default); expedited
+        // lanes are the signal worth persisting (TIR-367).
+        ...(lane !== 'standard' ? { reportType: lane } : {}),
       })
       setSubmitted(true)
       onReported()
@@ -175,6 +187,27 @@ export function ReportSheet({
                     }`}
                   >
                     {option === 60 ? '60+' : option}
+                  </button>
+                ))}
+              </div>
+            </fieldset>
+            <fieldset className="mt-4">
+              <legend className="text-sm font-semibold text-slate-700">Which lane are you in?</legend>
+              <div className="mt-3 grid grid-cols-3 gap-2" data-testid="lane-type-picker">
+                {LANE_TYPES.map((type) => (
+                  <button
+                    key={type}
+                    type="button"
+                    onClick={() => setLane(type)}
+                    aria-pressed={lane === type}
+                    data-testid={`lane-${type}`}
+                    className={`h-12 rounded-xl border text-sm font-semibold transition focus:outline-none focus:ring-2 focus:ring-brand-500/40 ${
+                      lane === type
+                        ? 'border-brand-500 bg-brand-500 text-white'
+                        : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
+                    }`}
+                  >
+                    {LANE_BUTTON_LABELS[type]}
                   </button>
                 ))}
               </div>

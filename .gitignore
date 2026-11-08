@@ -25,3 +25,6 @@ packages/*/tmp_*.txt
 
 # Legacy standalone web directory (moved to packages/web)
 /web/
+
+# TypeScript incremental build artifacts
+*.tsbuildinfo

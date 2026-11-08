@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { useOfflineQueue } from "../hooks/useOfflineQueue";
 import { apiUrl } from "../lib/apiUrl";
+import { LANE_TYPES, type LaneType } from "../lib/lane";
 
 interface ReportModalProps {
   checkpointId: string;
@@ -11,8 +12,16 @@ interface ReportModalProps {
 
 const WAIT_OPTIONS: number[] = [5, 10, 15, 20, 30, 45, 60];
 
+// Traveler-facing label per stored lane value; "standard" reads as "Standard".
+const LANE_BUTTON_LABELS: Record<LaneType, string> = {
+  standard: "Standard",
+  preclear: "TSA PreCheck",
+  clear: "CLEAR",
+};
+
 export default function ReportModal({ checkpointId, checkpointName, onClose, onReported }: ReportModalProps) {
   const [minutes, setMinutes] = useState(WAIT_OPTIONS[2]);
+  const [lane, setLane] = useState<LaneType>("standard");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
@@ -33,7 +42,7 @@ export default function ReportModal({ checkpointId, checkpointName, onClose, onR
     // If offline, queue immediately without trying to fetch
     if (!isOnline) {
       try {
-        const queued = await queueReport(checkpointId, minutes, "crowd");
+        const queued = await queueReport(checkpointId, minutes, "crowd", lane !== "standard" ? lane : undefined);
         if (queued) {
           setSuccess(true);
           setTimeout(() => {
@@ -55,7 +64,14 @@ export default function ReportModal({ checkpointId, checkpointName, onClose, onR
       const res = await fetch(apiUrl(`/api/checkpoints/${checkpointId}/wait-times`), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ minutes, source: "crowd", reportedAt: new Date().toISOString() }),
+        // Standard stays off the wire (deploy-era default); expedited lanes are
+        // the signal worth persisting (TIR-367).
+        body: JSON.stringify({
+          minutes,
+          source: "crowd",
+          ...(lane !== "standard" ? { reportType: lane } : {}),
+          reportedAt: new Date().toISOString(),
+        }),
       });
 
       if (res.status === 429) {
@@ -72,7 +88,7 @@ export default function ReportModal({ checkpointId, checkpointName, onClose, onR
       }
       
       if (!res.ok) {
-        const queued = await queueReport(checkpointId, minutes, "crowd");
+        const queued = await queueReport(checkpointId, minutes, "crowd", lane !== "standard" ? lane : undefined);
         if (queued) {
           setSuccess(true);
           setTimeout(() => {
@@ -154,6 +170,28 @@ setSuccess(true);
               <p className="text-center text-xs text-gray-500 mt-1">
                 {minutes} min
               </p>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium mb-1">Which lane?</label>
+              <div className="grid grid-cols-3 gap-2" role="radiogroup" aria-label="Lane type">
+                {LANE_TYPES.map((type) => (
+                  <button
+                    key={type}
+                    type="button"
+                    role="radio"
+                    aria-checked={lane === type}
+                    onClick={() => setLane(type)}
+                    className={`h-11 rounded-xl border text-xs font-semibold transition focus:outline-none focus:ring-2 focus:ring-brand-500/40 ${
+                      lane === type
+                        ? "border-brand-500 bg-brand-500 text-white"
+                        : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+                    }`}
+                  >
+                    {LANE_BUTTON_LABELS[type]}
+                  </button>
+                ))}
+              </div>
             </div>
 
             {error && <p className="text-sm text-red-600">{error}</p>}

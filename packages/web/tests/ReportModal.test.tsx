@@ -349,3 +349,70 @@ describe("ReportModal", () => {
     });
   });
 });
+
+describe("ReportModal lane picker (TIR-367)", () => {
+  const defaultProps = {
+    checkpointId: "cp-1",
+    checkpointName: "Test Checkpoint",
+    onClose: vi.fn(),
+    onReported: vi.fn(),
+  };
+
+  it("renders the three lane choices with traveler-facing labels", async () => {
+    await act(async () => {
+      render(<ReportModal {...defaultProps} />);
+    });
+    expect(screen.getByRole("radio", { name: "Standard" })).toBeDefined();
+    expect(screen.getByRole("radio", { name: "TSA PreCheck" })).toBeDefined();
+    expect(screen.getByRole("radio", { name: "CLEAR" })).toBeDefined();
+  });
+
+  it("defaults to the Standard lane", async () => {
+    await act(async () => {
+      render(<ReportModal {...defaultProps} />);
+    });
+    expect(screen.getByRole("radio", { name: "Standard" }).getAttribute("aria-checked")).toBe("true");
+    expect(screen.getByRole("radio", { name: "TSA PreCheck" }).getAttribute("aria-checked")).toBe("false");
+  });
+
+  it("sends reportType on the wire when an expedited lane is selected", async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch" as any)
+      .mockResolvedValueOnce({ ok: true, status: 201, statusText: "Created", json: async () => ({ data: { id: "wt-1" } }) });
+
+    await act(async () => {
+      render(<ReportModal {...defaultProps} />);
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("radio", { name: "TSA PreCheck" }));
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByText("Submit"));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("Thanks for reporting!")).toBeDefined();
+    });
+    const body = JSON.parse((fetchSpy.mock.calls[0][1] as RequestInit).body as string);
+    expect(body.reportType).toBe("preclear");
+  });
+
+  it("omits reportType from the wire when the Standard lane stays selected", async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch" as any)
+      .mockResolvedValueOnce({ ok: true, status: 201, statusText: "Created", json: async () => ({ data: { id: "wt-1" } }) });
+
+    await act(async () => {
+      render(<ReportModal {...defaultProps} />);
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByText("Submit"));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("Thanks for reporting!")).toBeDefined();
+    });
+    const body = JSON.parse((fetchSpy.mock.calls[0][1] as RequestInit).body as string);
+    expect(body.reportType).toBeUndefined();
+  });
+});
