@@ -119,6 +119,12 @@ function App() {
           </Routes>
         </ErrorBoundary>
       </main>
+      <footer
+        data-testid="app-footer"
+        className="mt-10 pb-6 text-center text-xs text-slate-500"
+      >
+        Flyby — crowdsourced airport security wait times
+      </footer>
     </div>
   )
 }
