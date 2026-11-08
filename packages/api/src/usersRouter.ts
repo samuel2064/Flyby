@@ -24,21 +24,24 @@ catchAsyncRoutes(router);
 router.post('/signup', signup);
 router.post('/login', login);
 
-const authMiddleware = (req: Request, _res: Response, next: NextFunction) => {
+const authMiddleware = (req: Request, res: Response, next: NextFunction) => {
   try {
     const token = req.headers.authorization?.replace('Bearer ', '') ?? null;
-    if (token) {
-      const dec = decodeToken(token);
-      if (dec?.scope === 'auth' && typeof dec?.sub === 'string') {
-        (req as AuthenticatedRequest).user = dec;
-        if (req.session) {
-          req.session.userId = dec.sub;
-        }
-      }
+    if (!token) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+    const dec = decodeToken(token);
+    const sub = dec?.sub;
+    if (!sub || typeof sub !== 'string' || dec.scope !== 'auth') {
+      return res.status(401).json({ error: 'Invalid token' });
+    }
+    (req as AuthenticatedRequest).user = dec;
+    if (req.session) {
+      req.session.userId = sub;
     }
     next();
   } catch {
-    next();
+    return res.status(401).json({ error: 'Invalid token' });
   }
 };
 
