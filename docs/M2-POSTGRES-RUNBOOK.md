@@ -105,7 +105,9 @@ them with zero loss. The mapping core already exists and is unit-tested:
   injected reader/sink ports: stage sequencing, per-airport checkpoint code
   derivation, compat-user session mapping, per-report flag counts, batched
   writes, aggregated warnings, stage counts. Tests:
-  `tests/migrateDeployData.test.ts` (6) incl. idempotent re-run.
+  `tests/migrateDeployData.test.ts` (6) incl. idempotent re-run;
+  `tests/migrationDryRun.test.ts` (6) lock the `DryRunSink` projection
+  (real-run count parity, no writes, per-airport attribution rules).
 - **`packages/api/src/migration/pgDeploySource.ts`** — the deploy-Postgres
   reader (keyset-paginated WaitReport reads, `DEPLOY_DATABASE_URL`).
 - **`packages/api/src/migration/prismaMigrationSink.ts`** — the
@@ -113,8 +115,16 @@ them with zero loss. The mapping core already exists and is unit-tested:
   deploy ids make re-runs converge).
 - **Runner**: `npm run migrate:deploy-data` with both `DEPLOY_DATABASE_URL`
   (deploy PG, read-only usage) and `DATABASE_URL` (target PG) set. It refuses
-  non-postgres URLs, prints a JSON stage-count/warnings report, and exits 0
-  on completed runs (skips are counted, not fatal) / 1 on config or IO errors.
+  non-postgres URLs, prints a JSON stage-count/warnings/per-airport report, and
+  exits 0 on completed runs (skips are counted, not fatal) / 1 on config or IO
+  errors.
+- **Dry-run preview**: `npm run migrate:deploy-data -- --dry-run` with only
+  `DEPLOY_DATABASE_URL` set. Reads the deploy PG (SELECTs only), connects to
+  nothing else, writes nothing anywhere, and prints the report with
+  `"dryRun": true` — the projection onto an EMPTY target (what a first real
+  run would write), including per-airport wait-report counts for the
+  checklist's per-airport count-parity review. Run it before staging PG
+  exists and again right before the real run; counts must match.
 
 One-time pre-flight before the real run: confirm the deploy database's table
 names match the reader's SQL (PascalCase `"Airport"`/`"Checkpoint"`/

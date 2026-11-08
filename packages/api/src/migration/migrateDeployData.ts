@@ -82,6 +82,8 @@ export interface MigrationReport {
   waitReports: StageCounts;
   skippedUnresolvedCheckpoints: number;
   reportFlags: StageCounts;
+  /** Wait reports per destination airport (migratable rows only; unresolved-checkpoint skips are not attributable). Sorted by code. */
+  perAirport: Array<{ airportCode: string; waitReports: number }>;
   /** Distinct warning messages with occurrence counts, sorted by count desc. */
   warnings: Array<{ message: string; count: number }>;
   idempotentReRun: boolean;
@@ -110,6 +112,36 @@ function chunk<T>(rows: T[], size: number): T[][] {
   const out: T[][] = [];
   for (let i = 0; i < rows.length; i += size) out.push(rows.slice(i, i + size));
   return out;
+}
+
+/**
+ * Write-nothing sink for `--dry-run` preview runs (TIR-339 condition 5).
+ * Implements MigrationSink by synthesizing deterministic ids so the
+ * orchestration computes exactly the counts/warnings/per-airport projection
+ * a real run would produce against an empty target - without opening a
+ * connection to the target or writing a single row anywhere. The deploy
+ * source is still read normally (read-only SELECTs).
+ */
+export class DryRunSink implements MigrationSink {
+  async upsertAirports(rows: MappedAirport[]): Promise<Map<string, string>> {
+    return new Map(rows.map((r) => [r.code, `dryrun-apt-${r.code}`]));
+  }
+
+  async upsertCheckpoints(): Promise<void> {
+    // No writes in dry-run mode.
+  }
+
+  async ensureCompatUsers(emails: string[]): Promise<Map<string, string>> {
+    return new Map(emails.map((email, i) => [email, `dryrun-user-${i + 1}`]));
+  }
+
+  async insertWaitTimes(): Promise<void> {
+    // No writes in dry-run mode.
+  }
+
+  async insertReportFlags(): Promise<void> {
+    // No writes in dry-run mode.
+  }
 }
 
 /**
@@ -232,6 +264,18 @@ export async function migrateDeployData(
     await sink.insertReportFlags(batch);
   }
 
+  // Per-airport wait-report projection (checklist "per-airport count parity").
+  // Reports whose checkpoint resolved keep their deploy checkpoint id, and the
+  // deploy checkpoint's airportId maps back to the destination airport code.
+  const airportIdByCheckpointId = new Map(deployCheckpoints.map((cp) => [cp.id, cp.airportId]));
+  const waitReportsByAirportCode = new Map<string, number>();
+  for (const row of migratable) {
+    const airportId = airportIdByCheckpointId.get(row.checkpointId);
+    const code = airportId !== undefined ? monorepoIdByDeployAirportId.get(airportId) : undefined;
+    if (code === undefined) continue;
+    waitReportsByAirportCode.set(code, (waitReportsByAirportCode.get(code) ?? 0) + 1);
+  }
+
   return {
     airports: { total: deployAirports.length, migrated: mappedAirports.length, skipped: airportsSkipped },
     checkpoints: {
@@ -247,6 +291,9 @@ export async function migrateDeployData(
     },
     skippedUnresolvedCheckpoints,
     reportFlags: { total: deployFlags.length, migrated: mappedFlags.length, skipped: 0 },
+    perAirport: [...waitReportsByAirportCode.entries()]
+      .map(([airportCode, waitReports]) => ({ airportCode, waitReports }))
+      .sort((a, b) => a.airportCode.localeCompare(b.airportCode)),
     warnings: warnings.listed(),
     idempotentReRun: false,
   };
