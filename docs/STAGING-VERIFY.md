@@ -1,6 +1,6 @@
 # Staging Verification
 
-**Status:** ready to run once the staging pair exists (blocked on Render Blueprint import — TIR-29, TIR-345)
+**Status:** ready to run once the staging pair exists (blocked on Render Blueprint import — TIR-29; prod API itself is restored and verified as of 2026-11-07)
 **Owner:** Founding Engineer (TIR-339)
 **Companion docs:** `docs/LAUNCH-CHECKLIST.md` (sequence), `docs/M2-POSTGRES-RUNBOOK.md` (deploy + data migration), `render.yaml` (service definitions)
 

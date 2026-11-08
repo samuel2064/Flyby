@@ -145,3 +145,24 @@ approval, not an A/B/C choice:
   apply on staging during M2.
 - **Prod baseline:** byte-compare cannot run until the prod API is restored
   (TIR-345), which is also the last dependency of TIR-365.
+
+## 8. Status addendum (2026-11-08) — prod restored; M3 green
+
+Supersedes the conditional statements in §5 and §7 above:
+
+- **Prod API restored** — `GET https://flyby-api.onrender.com/api/health` -> 200
+  (verified 2026-11-07 21:22Z and 2026-11-08 00:52Z). TIR-365's live regression
+  battery against restored prod is done.
+- **M3 byte-compare green and reproducible** — `.\scripts\run-compare.ps1 -Full`
+  -> pass=14, known=18, fail=0, byte-identical to the 11-06 closeout; the gate
+  self-sets `ADMIN_API_KEY` and passes `approved-divergences.json` by default
+  (commit `d4f5ebb`). Evidence: `test-output/contract-compare-full-2026-11-07.json`.
+- **Full suite on `monorepo-candidate`:** API 905/905, web 436/436, e2e 21/21
+  (2026-11-07, includes the TIR-362/363 web ports + M4 smoke harness).
+- **Remaining gate:** Render Blueprint import for the staging pair (TIR-29,
+  board-owned) — re-probed 2026-11-08, staging URLs still absent. Everything
+  else in §5 is satisfied or reproducible on demand.
+- **TIR-364 note:** the deploy-repo boot crash (VAPID keys validated at module
+  load) has no monorepo counterpart — `notifications.ts` validates keys lazily
+  in the send path (`isValidVapidKeyPair` + ephemeral fallback,
+  `tests/vapid.envkeys.test.ts`), so Option A does not inherit that failure mode.

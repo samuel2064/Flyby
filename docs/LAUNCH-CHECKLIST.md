@@ -1,7 +1,7 @@
 # Flyby Launch Checklist
 
-**Status:** AWAITING BOARD GATES (staging import / prod restore - see TIR-339)
-**Last reconciled:** 2026-10-21 (convergence era - supersedes the 2026-07-18 version)
+**Status:** AWAITING BOARD GATE (staging Blueprint import - TIR-29). Prod API restored and verified; M3 byte-compare green (2026-11-07).
+**Last reconciled:** 2026-11-08 (prod-restore state refresh - supersedes the 2026-10-21 version)
 **Authoritative operational docs:** `docs/M2-POSTGRES-RUNBOOK.md` (deploy + data migration), `docs/STAGING-VERIFY.md` (staging checklist), `render.yaml` (service definitions)
 
 This checklist is the high-level launch sequence. Where a step needs detail,
@@ -10,10 +10,12 @@ the linked doc is the source of truth - do not improvise commands here.
 ## Pre-Launch (board/DevOps)
 
 ### Infrastructure
-- [ ] **Restore/upgrade `flyby-api` on Render** (prod API dark since Sep 26 -
-      free-tier suspension per TIR-346 triage). Track: TIR-345.
+- [x] **Prod `flyby-api` restored** (2026-11-07: `GET /api/health` -> 200
+      `{"status":"ok",...}`; TIR-365 live regression battery done). Historical:
+      dark Sep 26 - Nov 7 (free-tier suspension, TIR-345/346 triage).
 - [ ] **Import the Render Blueprint** from this repo (staging pair:
       `flyby-api-staging` + `flyby-web-staging` per `render.yaml`). Track: TIR-29.
+      Re-probed 2026-11-08: both staging URLs still 404 - not yet imported.
 - [ ] Fill `sync: false` env vars on both staging services (staging PG URL,
       staging Redis URL, web -> staging API base). `ADMIN_API_KEY` auto-generates.
 - [ ] Prod PG + Redis stay as-is until the cutover decision (M4).
@@ -49,7 +51,10 @@ Then the 32-probe corpus: `node scripts/contract-compare.mjs --candidate <stagin
 - [ ] QA sign-off recorded on TIR-339 - entry gate for M4
 
 ### Production cutover (M4 - CEO go/no-go required)
-- [ ] M3 byte-compare vs prod green: `scripts/run-compare.ps1` (requires prod restored, TIR-345)
+- [x] M3 byte-compare vs prod green (2026-11-07): `.\scripts\run-compare.ps1 -Full`
+      -> pass=14, known=18, fail=0, byte-identical to the 11-06 closeout.
+      Evidence: `test-output/contract-compare-full-2026-11-07.json` (prod was the
+      live baseline - prod restore happened before this run).
 - [ ] CEO go/no-go recorded on TIR-339
 - [ ] Flip: web `VITE_API_BASE_URL` -> monorepo API URL (blueprint env or dashboard)
 - [ ] Old flyby-api service stays warm through the window (rollback = flip the env var back)
