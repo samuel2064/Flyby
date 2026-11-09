@@ -12,7 +12,7 @@ export default defineConfig({
     fileParallelism: false,
     testTimeout: 30000,
     env: {
-      DATABASE_URL: `file:${resolve(__dirname, "prisma/prisma/dev.db")}`,
+      DATABASE_URL: `file:${resolve(__dirname, "prisma/prisma/dev.db")}?connection_limit=1&pool_timeout=60`,
       MOCK_REDIS: "1",
       // Dev-only admin key so the moderation compat suites run without a local
       // packages/api/.env (CI checkouts have none). Not a secret: the same
