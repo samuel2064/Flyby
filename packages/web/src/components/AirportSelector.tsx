@@ -98,7 +98,7 @@ export function AirportSelector({
           </div>
           {recentAirports && recentAirports.length > 0 && (
             <div className="px-4 py-1 border-b border-slate-100 dark:border-slate-700">
-              <p className="px-2 text-[10px] font-semibold uppercase tracking-wide text-slate-400">Recent</p>
+              <p className="px-2 text-[10px] font-semibold uppercase tracking-wide text-slate-500">Recent</p>
               <div className="space-y-1">
                 {recentAirports.map((a) => (
                   <button

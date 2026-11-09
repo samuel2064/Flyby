@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { render, screen, waitFor, within, fireEvent } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { PublicDashboard } from "../src/components/PublicDashboard";
 import { AirportDetail } from "../src/components/AirportDetail";
@@ -160,5 +160,38 @@ describe("TIR-372 a11y sweep: placeholders and icon-only controls", () => {
     const close = screen.getByRole("button", { name: "Close" });
     expect(close).toHaveClass("text-slate-500");
     expect(close).not.toHaveClass("text-slate-400");
+  });
+});
+
+describe("TIR-372 rule applied to the upcoming-feature port (c81c432)", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("AirportSelector 'Recent' label uses slate-500 (AA), never slate-400", async () => {
+    const { AirportSelector } = await import("../src/components/AirportSelector");
+    render(
+      <AirportSelector
+        airport={{ code: "JFK", name: "John F. Kennedy International" }}
+        onChange={() => {}}
+        recentAirports={[{ code: "DEN", name: "Denver International" }]}
+      />
+    );
+
+    // Open the dropdown, then check the section label.
+    fireEvent.click(screen.getByText("JFK"));
+    const recent = await screen.findByText("Recent");
+    expect(recent).toHaveClass("text-slate-500");
+    expect(recent).not.toHaveClass("text-slate-400");
+  });
+
+  it("InfoSection disclosure chevron uses slate-500 (>=3:1 non-text contrast), never slate-400", async () => {
+    const { InfoSection } = await import("../src/components/InfoSection");
+    const { container } = render(<InfoSection title="Baggage" content="Carousel info" />);
+
+    const chevron = container.querySelector("button svg");
+    expect(chevron).not.toBeNull();
+    expect(chevron).toHaveClass("text-slate-500");
+    expect(chevron).not.toHaveClass("text-slate-400");
   });
 });
