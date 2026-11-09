@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+﻿import { useEffect, useRef, useState } from 'react'
 import { searchAirports, type Airport } from '../data/airports'
 
 interface AirportSearchProps {
@@ -56,7 +56,7 @@ export function AirportSearch({ selected, onSelect }: AirportSearchProps) {
       <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3.5">
         <svg
           aria-hidden="true"
-          className="h-5 w-5 text-slate-400"
+          className="h-5 w-5 text-slate-500"
           viewBox="0 0 24 24"
           fill="none"
           stroke="currentColor"
@@ -83,7 +83,7 @@ export function AirportSearch({ selected, onSelect }: AirportSearchProps) {
         }}
         onFocus={() => setOpen(true)}
         onKeyDown={onKeyDown}
-        className="h-12 w-full rounded-xl border border-slate-300 bg-white pl-11 pr-4 text-base shadow-sm placeholder:text-slate-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+        className="h-12 w-full rounded-xl border border-slate-300 bg-white pl-11 pr-4 text-base shadow-sm placeholder:text-slate-500 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
       />
       {open && results.length > 0 && (
         <ul
@@ -106,7 +106,7 @@ export function AirportSearch({ selected, onSelect }: AirportSearchProps) {
                   <span className="font-semibold text-brand-700">{airport.code}</span>{' '}
                   <span className="text-slate-700">{airport.city}</span>
                 </span>
-                <span className="hidden text-xs text-slate-400 sm:inline">{airport.name}</span>
+                <span className="hidden text-xs text-slate-500 sm:inline">{airport.name}</span>
               </button>
             </li>
           ))}

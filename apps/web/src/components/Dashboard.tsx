@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+﻿import { useCallback, useEffect, useMemo, useState } from 'react'
 import { getWaitTimesSummary } from '../api/summary'
 import type { AirportSummary } from '../api/summary'
 import {
@@ -68,9 +68,9 @@ export function Dashboard({ onSelectAirport }: DashboardProps) {
         </div>
         <p aria-live="polite" className="text-xs text-slate-500">
           {state === 'ready' && lastUpdated
-            ? `Updated ${lastUpdated.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} · refreshes every 60s`
+            ? `Updated ${lastUpdated.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} Â· refreshes every 60s`
             : state === 'loading'
-              ? 'Loading…'
+              ? 'Loadingâ€¦'
               : ''}
         </p>
       </div>
@@ -84,13 +84,13 @@ export function Dashboard({ onSelectAirport }: DashboardProps) {
           type="search"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Filter airports (e.g. JFK or Denver)…"
-          className="w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm text-slate-900 shadow-sm placeholder:text-slate-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+          placeholder="Filter airports (e.g. JFK or Denver)â€¦"
+          className="w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm text-slate-900 shadow-sm placeholder:text-slate-500 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
         />
       </div>
 
       {state === 'loading' && (
-        <p className="mt-6 text-sm text-slate-500">Loading airport wait times…</p>
+        <p className="mt-6 text-sm text-slate-500">Loading airport wait timesâ€¦</p>
       )}
       {state === 'error' && (
         <div className="mt-6 rounded-2xl border border-slate-200 bg-white p-6 text-center shadow-sm">
@@ -160,7 +160,7 @@ export function Dashboard({ onSelectAirport }: DashboardProps) {
           })}
           {visible.length === 0 && (
             <li className="rounded-2xl border border-slate-200 bg-white p-6 text-center text-sm text-slate-500 sm:col-span-2">
-              No airports match “{query.trim()}”.
+              No airports match â€œ{query.trim()}â€.
             </li>
           )}
         </ul>
