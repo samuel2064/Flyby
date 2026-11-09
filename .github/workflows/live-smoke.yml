@@ -118,7 +118,10 @@ jobs:
 
   live-web-smoke:
     name: Live web smoke
-    runs-on: ubuntu-latest
+    # Pin a Playwright-supported OS. `ubuntu-latest` now resolves to 26.04,
+    # where Playwright 1.60.0 cannot install chromium dependencies:
+    # "ERROR: Playwright does not support chromium on ubuntu26.04-x64" (TIR-379).
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - name: Probe the deployed PWA (retries tolerate Render cold starts)
