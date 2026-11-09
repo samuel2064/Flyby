@@ -144,13 +144,13 @@ export function Dashboard({ onSelectAirport }: DashboardProps) {
                   <div className="shrink-0 text-right">
                     {/* TIR-343: stale readings are de-emphasized and always
                         carry their age - never presented as fresh. */}
-                    <p className={`text-lg font-bold ${stale ? 'text-slate-400' : 'text-slate-900'}`}>
+                    <p className={`text-lg font-bold ${stale ? 'text-slate-500' : 'text-slate-900'}`}>
                       {formatMinutes(a.latestWaitMinutes)}
                     </p>
                     <p className={`text-xs ${stale ? 'font-medium text-slate-500' : 'text-slate-500'}`}>
                       reported {age}
                     </p>
-                    <p className="text-[10px] text-slate-400">
+                    <p className="text-[10px] text-slate-500">
                       {a.sampleSize} report{a.sampleSize === 1 ? '' : 's'}
                     </p>
                   </div>

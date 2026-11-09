@@ -159,7 +159,7 @@ function BarChart({ title, buckets }: { title: string; buckets: BarDatum[] }) {
                 <p className="truncate text-[10px] text-slate-500">
                   {v === null ? '' : formatAverage(v).replace(' min', '')}
                 </p>
-                <p className="truncate text-[10px] text-slate-400">{b.label}</p>
+                <p className="truncate text-[10px] text-slate-500">{b.label}</p>
               </div>
             )
           })}

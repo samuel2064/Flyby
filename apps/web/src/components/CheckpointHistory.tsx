@@ -77,7 +77,7 @@ export function CheckpointHistory({ airportCode, checkpointName }: CheckpointHis
           {state.status === 'ready' && (
             <>
               <WaitHistoryChart history={state.points} />
-              <p className="mt-1 text-xs text-slate-400">
+              <p className="mt-1 text-xs text-slate-500">
                 {state.reportCount === 0
                   ? 'Averages per 30-minute bucket, from crowdsourced reports'
                   : `${state.reportCount} report${state.reportCount === 1 ? '' : 's'} in the last 4 hours · averages per 30-minute bucket`}
