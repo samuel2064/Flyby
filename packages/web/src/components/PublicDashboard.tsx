@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { getWaitTimesSummary } from '../api/summary'
 import type { AirportSummary } from '../api/summary'
 import {
@@ -43,6 +43,10 @@ export function PublicDashboard({ onSelectAirport }: PublicDashboardProps) {
   useRefreshInterval(() => {
     void load()
   }, AUTO_REFRESH_MS)
+
+  useEffect(() => {
+    void load()
+  }, [load])
 
   const visible = useMemo(
     () => filterAirports(sortBySeverity(airports), query),
@@ -139,13 +143,13 @@ export function PublicDashboard({ onSelectAirport }: PublicDashboardProps) {
                     <p className="mt-0.5 truncate text-xs text-slate-500">{a.airportName}</p>
                   </div>
                   <div className="shrink-0 text-right">
-                    <p className={`text-lg font-bold ${stale ? 'text-slate-400' : 'text-slate-900'}`}>
+                    <p className={`text-lg font-bold ${stale ? 'text-slate-500' : 'text-slate-900'}`}>
                       {formatMinutes(a.latestWaitMinutes)}
                     </p>
                     <p className={`text-xs ${stale ? 'font-medium text-slate-500' : 'text-slate-500'}`}>
                       reported {age}
                     </p>
-                    <p className="text-[10px] text-slate-400">
+                    <p className="text-[10px] text-slate-500">
                       {a.sampleSize} report{a.sampleSize === 1 ? '' : 's'}
                     </p>
                   </div>
