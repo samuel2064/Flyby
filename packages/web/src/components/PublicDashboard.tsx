@@ -86,7 +86,7 @@ export function PublicDashboard({ onSelectAirport }: PublicDashboardProps) {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Filter airports (e.g. JFK or Denver)…"
-          className="w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm text-slate-900 shadow-sm placeholder:text-slate-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+          className="w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm text-slate-900 shadow-sm placeholder:text-slate-500 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
         />
       </div>
 

@@ -3,6 +3,7 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { PublicDashboard } from "../src/components/PublicDashboard";
 import { AirportDetail } from "../src/components/AirportDetail";
+import { ReportSheet } from "../src/components/ReportSheet";
 
 // TIR-366 follow-up: the TIR-308 lesson (text-slate-400 on white fails WCAG AA
 // at ~2.56:1; text-slate-500 clears it at ~4.76:1) applies to every
@@ -132,5 +133,32 @@ describe("AirportDetail chart label a11y contrast (TIR-308 rule)", () => {
     const label = screen.getByText("14");
     expect(label).toHaveClass("text-slate-500");
     expect(label).not.toHaveClass("text-slate-400");
+  });
+});
+
+describe("TIR-372 a11y sweep: placeholders and icon-only controls", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("dashboard filter placeholder uses slate-500 (AA), never slate-400", async () => {
+    mockFetchJson({ airports: [], airportCount: 0 });
+    render(<PublicDashboard onSelectAirport={() => {}} />);
+
+    const input = await screen.findByPlaceholderText(/Filter airports/);
+    expect(input).toHaveClass("placeholder:text-slate-500");
+    expect(input).not.toHaveClass("placeholder:text-slate-400");
+  });
+
+  it("ReportSheet close icon-control uses slate-500 (>=3:1 non-text contrast), never slate-400", async () => {
+    render(
+      <ReportSheet open airportCode="DEN" onClose={() => {}} onReported={() => {}} />
+    );
+
+    // The X icon-control (backdrop is labeled "Close report dialog" and is
+    // class-free by design).
+    const close = screen.getByRole("button", { name: "Close" });
+    expect(close).toHaveClass("text-slate-500");
+    expect(close).not.toHaveClass("text-slate-400");
   });
 });

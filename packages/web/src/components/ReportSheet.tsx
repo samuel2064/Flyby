@@ -129,7 +129,7 @@ export function ReportSheet({
             type="button"
             onClick={onClose}
             aria-label="Close"
-            className="flex h-12 w-12 items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+            className="flex h-12 w-12 items-center justify-center rounded-full text-slate-500 hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
           >
             <svg
               aria-hidden="true"
