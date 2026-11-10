@@ -25,6 +25,16 @@ const fail = (msg) => {
   throw new Error(msg)
 }
 
+// The PWA's default landing view is the Dashboard; the search + report flow
+// lives on its own "Search & Report" tab (TIR-317). Selectors such as
+// #airport-search only exist once that tab is active, and a reload resets the
+// SPA back to the Dashboard - so navigate here before probing the search UI.
+async function openSearchTab(page) {
+  const tab = page.getByRole('button', { name: 'Search & Report' })
+  await tab.waitFor({ state: 'visible', timeout: 60_000 })
+  await tab.click()
+}
+
 async function attempt(n) {
   const browser = await chromium.launch()
   const errors = []
@@ -39,6 +49,7 @@ async function attempt(n) {
       () => document.getElementById('root') !== null,
       { timeout: 60_000 }
     )
+    await openSearchTab(page)
     await page.waitForSelector('#airport-search', { state: 'visible', timeout: 60_000 })
 
     // Default airport (SEA): checkpoint cards must render
@@ -111,9 +122,14 @@ async function attempt(n) {
       { timeout: 30_000 },
     )
     await page.reload({ waitUntil: 'domcontentloaded' })
+    // A reload resets the SPA to the Dashboard tab; re-enter Search & Report.
+    await openSearchTab(page)
     await page.waitForSelector('article', { timeout: 60_000 })
     await page.context().setOffline(true)
     await page.reload({ waitUntil: 'domcontentloaded' })
+    // Offline: the SW-cached shell must mount. Navigating the shell offline is
+    // the real airport-WiFi assertion; the search UI follows once it is up.
+    await openSearchTab(page)
     await page.waitForSelector('#airport-search', { timeout: 30_000 })
     console.log('  offline: shell cached by the SW, mounted with the network down')
     await page.context().setOffline(false)
