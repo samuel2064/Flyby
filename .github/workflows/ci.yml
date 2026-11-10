@@ -32,6 +32,12 @@ permissions:
 env:
   NODE_ENV: test
   LOCAL_REDIS: 'redis://localhost:6379'
+  # NOTE: no workflow-level DATABASE_URL here on purpose. The API test suite
+  # (packages/api/vitest.config.ts) pins its own absolute SQLite URL at
+  # packages/api/prisma/prisma/dev.db (Prisma resolves relative file: URLs
+  # against the schema directory, hence the doubled prisma/ segment). CI
+  # provisions that exact file below; a wrong relative global here would
+  # silently push a throwaway DB somewhere the tests never read.
 
 jobs:
   # ── Type check ────────────────────────────────────────────────────
@@ -128,16 +134,26 @@ jobs:
       - name: Generate Prisma client
         run: npm run db:generate
 
-      - name: Push database schema
-        run: npx prisma db push --schema=packages/api/prisma/schema.prisma
+      - name: Setup test database
+        # The vitest config (packages/api/vitest.config.ts) pins an ABSOLUTE
+        # url at packages/api/prisma/prisma/dev.db. A fresh checkout has no
+        # prisma/prisma/ subdirectory, and SQLite cannot create a file in a
+        # missing directory -> "Error code 14: Unable to open the database
+        # file" in every DB-touching hook (CI run 42723299092). So: create
+        # the exact directory tree the tests read, then push the schema to
+        # that exact file via an absolute URL (relative file: URLs are
+        # resolved against the schema directory, not the cwd).
+        run: |
+          mkdir -p packages/api/prisma/prisma
+          npx prisma db push --schema=packages/api/prisma/schema.prisma --skip-generate --accept-data-loss
         env:
-          DATABASE_URL: file:./packages/api/prisma/dev.db
+          DATABASE_URL: file:${{ github.workspace }}/packages/api/prisma/prisma/dev.db
 
       - name: Run backend tests with coverage
         shell: bash
         run: npm run test:coverage --workspace=packages/api 2>&1 | tee /tmp/apitest.log; exit ${PIPESTATUS[0]}
         env:
-          DATABASE_URL: file:./packages/api/prisma/dev.db
+          DATABASE_URL: file:${{ github.workspace }}/packages/api/prisma/prisma/dev.db
           REDIS_URL: redis://localhost:6379
 
       - name: Backend test failure diagnostics
@@ -215,7 +231,10 @@ jobs:
   # E2E tests are now stable and passing (17 tests covering home, search,
   # airport-detail, report-wait-time, and auth flows). They block PRs.
   e2e:
-    runs-on: ubuntu-latest
+    # Pinned to 24.04 on purpose (same fix as deploy-repo PR #49):
+    # ubuntu-latest migrated to 26.04 on 2026-10-19 and Playwright 1.60's
+    # chromium install breaks there. Pin BEFORE it bites this job.
+    runs-on: ubuntu-24.04
     name: E2E Tests
     timeout-minutes: 20
 
@@ -248,10 +267,16 @@ jobs:
       - name: Generate Prisma client
         run: npm run db:generate
 
-      - name: Push e2e database schema
-        run: npx prisma db push --schema=packages/api/prisma/schema.prisma
+      - name: Setup E2E test database
+        # Same file the Playwright config + globalSetup.ts pin (absolute URL
+        # to packages/api/prisma/e2e.db). Provisioning it here fails fast
+        # with a clear step name; globalSetup's push+seed is idempotent on
+        # top of it.
+        run: |
+          mkdir -p packages/api/prisma
+          npx prisma db push --schema=packages/api/prisma/schema.prisma --skip-generate --accept-data-loss
         env:
-          DATABASE_URL: file:./packages/api/prisma/e2e.db
+          DATABASE_URL: file:${{ github.workspace }}/packages/api/prisma/e2e.db
 
       - name: Install Playwright browsers
         if: steps.playwright-cache.outputs.cache-hit != 'true'
@@ -260,7 +285,7 @@ jobs:
       - name: Run E2E tests
         run: npm run test:e2e
         env:
-          DATABASE_URL: file:./packages/api/prisma/e2e.db
+          DATABASE_URL: file:${{ github.workspace }}/packages/api/prisma/e2e.db
           REDIS_URL: redis://localhost:6379
 
       - name: Upload Playwright report
