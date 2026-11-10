@@ -1825,3 +1825,6 @@ module.exports.computeWaitStats = computeWaitStats;
 // Exposed for the test suite: cross-airport summary core (TIR-321 scope merge)
 // exercised directly (latest wait, trend windows, empty airports) without a DB.
 module.exports.computeWaitTimesSummary = computeWaitTimesSummary;
+
+// DELIBERATE gate test - invalid syntax (TIR-383); branch will be deleted
+this is deliberately not valid javascript (
