@@ -1,14 +1,27 @@
 import { test, expect } from "@playwright/test";
 
 /**
- * Report wait time E2E tests — verifies the full reporting flow:
- * open report modal, adjust minutes, submit, and see success feedback.
+ * Report flow E2E (rewritten for the current reporting surface).
+ *
+ * The routed report path is the checkpoint page (/checkpoint/:id, Report Time
+ * button -> ReportModal). Checkpoint ids are Prisma UUIDs in the seeded E2E
+ * database, so the test discovers one through the public airport-detail API
+ * instead of hardcoding an id.
+ *
+ * The POST is intercepted so the test is deterministic (rate limits and DB
+ * contention from other workers must not flap the suite).
  */
 
 test.describe("Report wait time", () => {
-  test("submits a wait time report and shows success", async ({ page }) => {
-    // Intercept the API call so the test is deterministic and not affected
-    // by rate limits or DB contention from other test workers.
+  test("opens the report modal from a checkpoint page and submits successfully", async ({ page }) => {
+    // Discover a seeded checkpoint id for JFK through the public API.
+    const detail = await page.request.get("/api/airports/JFK");
+    expect(detail.ok()).toBeTruthy();
+    const payload = await detail.json();
+    const checkpointId = payload?.data?.checkpoints?.[0]?.id;
+    expect(checkpointId, "seeded JFK airport detail must expose checkpoints").toBeTruthy();
+
+    // Deterministic POST: fulfill with the 201 contract shape.
     await page.route("**/api/checkpoints/*/wait-times", async (route) => {
       const request = route.request();
       if (request.method() === "POST") {
@@ -24,35 +37,42 @@ test.describe("Report wait time", () => {
       await route.continue();
     });
 
-    await page.goto("/airport/JFK");
+    await page.goto(`/checkpoint/${checkpointId}`);
 
-    // Wait for the page to be fully loaded
-    await expect(page.getByRole("heading", { name: "Checkpoints" })).toBeVisible();
-
-    // Open the report modal on the first checkpoint
-    const reportButton = page.getByRole("button", { name: /Report wait time for/ }).first();
+    // Open the report modal.
+    const reportButton = page.getByRole("button", { name: /Report Time/i }).first();
+    await expect(reportButton).toBeVisible();
     await reportButton.click();
 
-    // Modal appears with the right heading and checkpoint name
     await expect(page.getByRole("heading", { name: "Report Wait Time" })).toBeVisible();
 
-    // Verify the slider and initial value (scope to the modal form to avoid matching list items)
-    const modalForm = page.locator("form");
-    const slider = modalForm.locator('input[type="range"]');
-    await expect(slider).toBeVisible();
-    await expect(modalForm.getByText("15 min")).toBeVisible();
+    // Preset wait-time options with 15 selected by default.
+    await expect(page.getByRole("button", { name: "15", exact: true })).toBeVisible();
 
-    // Adjust minutes to 20 using Playwright's fill method
-    await slider.fill("20");
+    // Lane picker (TIR-367): three choices, Standard preselected.
+    const standard = page.getByRole("radio", { name: "Standard" });
+    await expect(standard).toBeVisible();
+    await expect(standard).toHaveAttribute("aria-checked", "true");
 
-    // Click the Submit button
-    await page.getByRole("button", { name: "Submit" }).click();
+    // Submit and observe the success feedback.
+    await page.getByRole("button", { name: "Submit", exact: true }).click();
+    await expect(page.getByText(/Thanks for reporting/)).toBeVisible({ timeout: 10_000 });
 
-    // Wait for success state
-    const successMessage = page.getByText(/Thanks for reporting/);
-    await expect(successMessage).toBeVisible({ timeout: 10_000 });
-    
-    // Modal should auto-close after success
+    // The modal auto-closes after the success flash.
+    await expect(page.getByRole("heading", { name: "Report Wait Time" })).not.toBeVisible({ timeout: 10_000 });
+  });
+
+  test("report modal is cancellable without submitting", async ({ page }) => {
+    const detail = await page.request.get("/api/airports/JFK");
+    const payload = await detail.json();
+    const checkpointId = payload?.data?.checkpoints?.[0]?.id;
+    expect(checkpointId).toBeTruthy();
+
+    await page.goto(`/checkpoint/${checkpointId}`);
+    await page.getByRole("button", { name: /Report Time/i }).first().click();
+    await expect(page.getByRole("heading", { name: "Report Wait Time" })).toBeVisible();
+
+    await page.getByRole("button", { name: "Cancel" }).click();
     await expect(page.getByRole("heading", { name: "Report Wait Time" })).not.toBeVisible();
   });
 });

@@ -1,45 +1,59 @@
 import { test, expect } from "@playwright/test";
 
 /**
- * Airport detail E2E tests — verifies the airport detail page loads
- * with airport information and a list of checkpoints with wait times.
+ * Airport detail E2E (rewritten for the TIR-363 stats drill surface).
+ * /airport/:code renders the per-airport stats page: Avg / Median / P90 strip,
+ * busiest-hours and day-of-week CSS bar charts, all fed by the live
+ * /api/airports/:code/wait-stats endpoint.
+ *
+ * NOTE: the previous spec asserted the retired checkpoint-list UI (checkpoint
+ * cards, per-card report buttons, best-time chips). That surface was replaced
+ * by this stats drill in the TIR-363 port; the forecast API contract itself
+ * remains covered by the packages/api contract tests and the 32-probe
+ * launch corpus.
  */
 
-test.describe("Airport detail page", () => {
-  test("displays airport info and checkpoints", async ({ page }) => {
+test.describe("Airport detail stats page", () => {
+  test("renders airport stats fed by the live wait-stats endpoint", async ({ page }) => {
+    const statsResponse = page.waitForResponse(
+      (res) => res.url().includes("/api/airports/JFK/wait-stats") && res.status() === 200,
+      { timeout: 30_000 },
+    );
     await page.goto("/airport/JFK");
+    await statsResponse;
 
-    // Airport name and location
-    await expect(page.getByRole("heading", { name: "John F. Kennedy International Airport" })).toBeVisible();
-    await expect(page.getByText("New York, NY — USA")).toBeVisible();
+    // Heading combines the code and the airport name from the stats payload.
+    await expect(page.getByRole("heading", { name: /JFK · John F. Kennedy International/ })).toBeVisible();
 
-    // Checkpoints section
-    await expect(page.getByRole("heading", { name: "Checkpoints" })).toBeVisible();
+    // Sample-size provenance line (no reporter identity exposed).
+    await expect(page.getByText(/Based on \d+ crowd report/)).toBeVisible();
 
-    // At least one checkpoint card
-    const checkpointCards = page.locator(".bg-white.rounded-lg");
-    await expect(checkpointCards.first()).toBeVisible();
+    // The Avg / Median / P90 strip.
+    await expect(page.getByText("Average")).toBeVisible();
+    await expect(page.getByText("Median (P50)")).toBeVisible();
+    await expect(page.getByText("Worst case (P90)")).toBeVisible();
 
-    // Check for a specific seeded checkpoint
-    await expect(page.getByText("Terminal 1 Security")).toBeVisible();
+    // Both CSS bar charts render with their titles (figcaption only — the
+    // sr-only summary paragraph repeats the title text).
+    await expect(page.locator("figure figcaption").filter({ hasText: "Busiest hours" })).toBeVisible();
+    await expect(page.locator("figure figcaption").filter({ hasText: "By day of week" })).toBeVisible();
   });
 
-  test("has working Report buttons for each checkpoint", async ({ page }) => {
+  test("returns to the dashboard via the back control", async ({ page }) => {
     await page.goto("/airport/JFK");
+    await expect(page.getByRole("heading", { name: /JFK · / })).toBeVisible({ timeout: 30_000 });
 
-    // Wait for page to load
-    await expect(page.getByRole("heading", { name: "John F. Kennedy International Airport" })).toBeVisible();
+    await page.getByRole("button", { name: /All airports/ }).click();
+    await expect(page).toHaveURL(/\/$/);
+    await expect(page.getByRole("heading", { name: "Wait-time dashboard" })).toBeVisible();
+  });
 
-    // Find all Report buttons
-    const reportButtons = page.getByRole("button", { name: /Report wait time for/ });
-    const count = await reportButtons.count();
-    expect(count).toBeGreaterThan(0);
+  test("shows an error state for an unknown airport code", async ({ page }) => {
+    await page.goto("/airport/ZZZ");
 
-    // Click the first report button
-    await reportButtons.first().click();
-
-    // Verify the modal appears
-    await expect(page.getByRole("heading", { name: "Report Wait Time" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Cancel" })).toBeVisible();
+    // The stats drill error state (NOTE: unlike PublicDashboard it currently
+    // has no Retry control — flagged as a UX follow-up on the TIR-363 lane).
+    await expect(page.getByText(/Could not load stats for ZZZ/)).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText("The API may be waking up. Try again in a moment.")).toBeVisible();
   });
 });

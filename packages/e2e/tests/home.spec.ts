@@ -1,49 +1,51 @@
 import { test, expect } from "@playwright/test";
 
 /**
- * Home page E2E tests — verifies the main dashboard loads and displays
- * live checkpoint wait times with the correct structure.
+ * Landing dashboard E2E (rewritten for the TIR-363 public dashboard surface).
+ * The "/" route renders PublicDashboard: severity-bucketed airport rows fed
+ * by the live /api/wait-times/summary aggregate, 60s auto-refresh, client-side
+ * filter. Rows drill into the per-airport stats page.
  */
 
-test.describe("Home page", () => {
-  test("loads live wait times dashboard", async ({ page }) => {
+test.describe("Landing dashboard", () => {
+  test("loads the wait-time dashboard with seeded airport rows", async ({ page }) => {
     await page.goto("/");
 
-    // Heading
-    await expect(page.getByRole("heading", { name: "Live Wait Times" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Wait-time dashboard" })).toBeVisible();
 
-    // Airport cards rendered
-    const airportCards = page.locator(".bg-white.rounded-lg");
-    await expect(airportCards.first()).toBeVisible();
-
-    // Expand the first airport card by clicking its header button
-    const firstCard = airportCards.first();
-    const expandButton = firstCard.locator("button[aria-expanded]");
-    await expect(expandButton).toBeVisible();
-    await expandButton.click();
-
-    // After expanding, the card should show checkpoint details
-    const firstExpanded = firstCard.locator('[data-testid^="airport-checkpoints-"]');
-    await expect(firstExpanded).toBeVisible();
-
-    // Checkpoint details should include Terminal info and a Report button
-    await expect(firstExpanded.getByText(/Terminal/).first()).toBeVisible();
-    await expect(firstExpanded.getByRole("button", { name: "Report time" }).first()).toBeVisible();
+    // The seeded JFK airport renders as a severity row with wait + report count.
+    const jfkRow = page.getByRole("button", { name: /John F. Kennedy International/ });
+    await expect(jfkRow).toBeVisible({ timeout: 10_000 });
+    await expect(jfkRow).toContainText(/report/);
+    await expect(jfkRow).toContainText(/min/);
   });
 
-  test("shows correct wait time color buckets", async ({ page }) => {
+  test("filters rows and shows the empty state for unknown queries", async ({ page }) => {
     await page.goto("/");
 
-    const cards = page.locator(".bg-white.rounded-lg");
-    await expect(cards.first()).toBeVisible();
+    const jfkRow = page.getByRole("button", { name: /John F. Kennedy International/ });
+    await expect(jfkRow).toBeVisible({ timeout: 10_000 });
 
-    // Verify at least one card has a valid color class applied based on wait time
-    const validWaitTime = page.locator(".text-green-600, .text-yellow-600, .text-red-600");
-    const noWaitTime = page.locator(".text-gray-400");
-    const waitTimeCount = await validWaitTime.count();
-    const noWaitCount = await noWaitTime.count();
+    const filter = page.getByPlaceholder(/Filter airports/);
+    await filter.fill("JFK");
+    await expect(jfkRow).toBeVisible();
 
-    // Expect either some cards show colors OR some show gray (if no data)
-    expect(waitTimeCount + noWaitCount).toBeGreaterThan(0);
+    await filter.fill("ZZZZ");
+    await expect(page.getByText(/No airports match/)).toBeVisible();
+    await expect(jfkRow).toHaveCount(0);
+
+    await filter.fill("");
+    await expect(jfkRow).toBeVisible();
+  });
+
+  test("drills into the airport stats page when a row is clicked", async ({ page }) => {
+    await page.goto("/");
+
+    const jfkRow = page.getByRole("button", { name: /John F. Kennedy International/ });
+    await expect(jfkRow).toBeVisible({ timeout: 10_000 });
+    await jfkRow.click();
+
+    await expect(page).toHaveURL(/\/airport\/JFK$/);
+    await expect(page.getByRole("heading", { name: /JFK · John F. Kennedy International/ })).toBeVisible();
   });
 });
