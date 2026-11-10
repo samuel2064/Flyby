@@ -30,3 +30,6 @@ packages/*/tmp_*.txt
 *.tsbuildinfo
 *.db-wal
 *.db-shm
+
+# vite-plugin-pwa dev artifacts
+packages/web/dev-dist/
