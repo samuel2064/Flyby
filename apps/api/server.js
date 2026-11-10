@@ -1825,3 +1825,6 @@ module.exports.computeWaitStats = computeWaitStats;
 // Exposed for the test suite: cross-airport summary core (TIR-321 scope merge)
 // exercised directly (latest wait, trend windows, empty airports) without a DB.
 module.exports.computeWaitTimesSummary = computeWaitTimesSummary;
+
+// TIR-389 QA gate test: intentional syntax error below (do not merge)
+function qa_gate_test_tir389( {
