@@ -24,7 +24,11 @@ services:
     runtime: static
     branch: main
     rootDir: apps/web
-    autoDeploy: true
+    # TIR-387 Control 2 ("Wait for CI"): only auto-deploy once the commit's
+    # GitHub checks pass. Declarative equivalent of the Render dashboard
+    # Settings -> "Wait for CI" toggle. `autoDeployTrigger` supersedes the
+    # deprecated `autoDeploy`.
+    autoDeployTrigger: checksPass
     buildCommand: npm ci && npm run build
     staticPublishPath: dist
     envVars:
@@ -42,7 +46,8 @@ services:
     region: oregon
     branch: main
     rootDir: apps/api
-    autoDeploy: true
+    # TIR-387 Control 2 ("Wait for CI"): see flyby-web above.
+    autoDeployTrigger: checksPass
     buildCommand: npm ci --omit=dev && npx prisma generate
     startCommand: npx prisma migrate deploy && npm start
     healthCheckPath: /api/health
