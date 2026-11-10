@@ -1,19 +1,18 @@
 name: Web CI
 
 # Frontend (Vite PWA) pipeline. The backend pipeline lives in ci.yml.
-# Path-filtered so web changes only run the web job and vice versa.
+#
+# TIR-387: this job is a REQUIRED status check on `main` (green-build gate).
+# It previously ran only when apps/web/** changed; a path-filtered workflow
+# never reports on PRs that touch other paths, and a required check that
+# never reports blocks the PR forever. Run it on every push/PR to main so
+# the required check always reports.
 
 on:
   push:
     branches: [main]
-    paths:
-      - "apps/web/**"
-      - ".github/workflows/web-ci.yml"
   pull_request:
     branches: [main]
-    paths:
-      - "apps/web/**"
-      - ".github/workflows/web-ci.yml"
 
 jobs:
   web-build:

@@ -3,6 +3,13 @@ name: Live API smoke check
 on:
   push:
     branches: [main]
+  # TIR-387: "Live smoke" and "Live web smoke" are REQUIRED status checks on
+  # `main` (green-build gate). Without a pull_request trigger these checks
+  # never report on PRs and the gate would block every merge. The 15-min
+  # scheduled ticks remain the monitor-only path; this makes them a PR-time
+  # prod-health canary (do not promote new code while prod is unhealthy).
+  pull_request:
+    branches: [main]
   schedule:
     - cron: '*/15 * * * *'
   workflow_dispatch:
@@ -170,3 +177,56 @@ jobs:
         working-directory: apps/web
       - name: Live DOM smoke
         run: node apps/web/scripts/live-web-smoke.mjs
+
+  # TIR-387 Control 3 (auto-incident): when a *scheduled* live-smoke run
+  # fails, file a de-duplicated, labelled incident issue so a bad/partial
+  # Render deploy (TIR-301 failure mode) pages a human within one 15-min
+  # tick. Scheduled-only: PR runs surface failures as a red check instead.
+  file-incident:
+    name: File incident on scheduled smoke failure
+    needs: [live-smoke, live-web-smoke]
+    if: failure() && github.event_name == 'schedule'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const serverUrl = process.env.GITHUB_SERVER_URL || 'https://github.com';
+            const runUrl = `${serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`;
+
+            // Ensure the labels exist (create if missing; ignore races).
+            for (const [name, color] of [['auto-incident', 'b60205'], ['ci', 'fbca04']]) {
+              try {
+                await github.rest.issues.getLabel({ owner, repo, name });
+              } catch (e) {
+                if (e.status === 404) {
+                  await github.rest.issues.createLabel({ owner, repo, name, color });
+                }
+              }
+            }
+
+            // De-dup: skip if an open auto-incident already exists.
+            const existing = await github.rest.issues.listForRepo({
+              owner, repo, state: 'open', labels: 'auto-incident,ci', per_page: 1,
+            });
+            if (existing.data.length > 0) {
+              core.info(`Open auto-incident already exists (#${existing.data[0].number}); skipping.`);
+              return;
+            }
+
+            const title = `[auto] Live smoke FAILED on main (${new Date().toISOString().slice(0, 16)}Z)`;
+            await github.rest.issues.create({
+              owner, repo, title,
+              body: [
+                'A scheduled live-smoke run failed on **main** - the TIR-301 failure mode (bad or partial Render deploy is live).',
+                '',
+                `- Run: ${runUrl}`,
+                `- Triage: check the Render dashboard for \`flyby-api\` / \`flyby-web\`; rollback = redeploy the last green commit.`,
+                '- Filed automatically; de-duplicates against open `auto-incident,ci` issues (TIR-387).',
+              ].join('\n'),
+              labels: ['auto-incident', 'ci'],
+            });
