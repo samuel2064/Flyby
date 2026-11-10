@@ -187,3 +187,18 @@ See [docs/API.md](docs/API.md) for complete API specification.
 ## License
 
 MIT
+
+## Deployment Notes
+
+### Render Free Tier Cold-Start Behavior (TIR-376)
+
+**Important:** `flyby-api` on Render's free tier spins down after ~15 minutes of inactivity and cold-starts in ~20 seconds. Any health probe/monitor with a timeout shorter than the cold start will receive HTTP 000 (connection timeout) and report a false outage.
+
+**Mitigations in place:**
+- Live smoke / uptime monitor timeouts set to **>= 100 seconds** (see `.github/workflows/live-smoke.yml` and `scripts/live-smoke.mjs`)
+- Staging verify timeout set to **>= 100 seconds** (see `scripts/staging-verify.mjs`)
+- Scheduled smoke runs every 15 minutes keep the instance warm (`ENABLE_LIVE_SMOKE=true`)
+
+**For future agents:** Do not diagnose an outage based on short-timeout probes. Verify with a >=100s timeout before escalating. A slow-but-successful cold start (HTTP 200 after ~20s) is HEALTHY.
+
+**References:** TIR-345 (20-day phantom outage caused by 10s timeout probes), TIR-376 (this hardening).

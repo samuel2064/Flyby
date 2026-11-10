@@ -62,7 +62,7 @@ export function parseArgs(argv) {
     report: arg("--report", ""),
     expectEnv: arg("--expect-env", "production"),
     minAirports: Number(arg("--min-airports", String(DEFAULT_MIN_AIRPORTS))),
-    timeoutMs: Number(arg("--timeout-ms", "60000")),
+    timeoutMs: Number(arg("--timeout-ms", "100000")),
   };
 }
 

@@ -62,7 +62,7 @@ export function parseArgs(argv) {
     api: arg("--api", DEFAULT_API).replace(/\/+$/, ""),
     airport: arg("--airport", ""),
     maxPostMs: Number(arg("--max-post-ms", String(DEFAULT_MAX_POST_MS))),
-    timeoutMs: Number(arg("--timeout-ms", "20000")),
+    timeoutMs: Number(arg("--timeout-ms", "100000")),
     pollAttempts: Number(arg("--poll-attempts", "5")),
     pollIntervalMs: Number(arg("--poll-interval-ms", "1000")),
     keepReports: has("--keep-reports"),

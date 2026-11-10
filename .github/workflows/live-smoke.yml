@@ -65,7 +65,7 @@ jobs:
           if [ -z "$API_URL" ]; then
             echo "::error::No api_url input and no vars.LIVE_SMOKE_API_URL configured"; exit 1
           fi
-          ARGS=(--api "$API_URL" --report tmp/live-smoke.json)
+          ARGS=(--api "$API_URL" --report tmp/live-smoke.json --timeout-ms 100000)
           if [ -n "${{ inputs.max_post_ms }}" ]; then ARGS+=(--max-post-ms "${{ inputs.max_post_ms }}"); fi
           if [ "${{ inputs.keep_reports }}" = "true" ]; then ARGS+=(--keep-reports); fi
           node scripts/live-smoke.mjs "${ARGS[@]}"
