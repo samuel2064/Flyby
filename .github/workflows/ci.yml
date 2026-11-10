@@ -279,7 +279,13 @@ jobs:
           DATABASE_URL: file:${{ github.workspace }}/packages/api/prisma/e2e.db
 
       - name: Install Playwright browsers
-        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        # ALWAYS run (idempotent). The cache only saves the browser download;
+        # --with-deps must still run every time to install the SYSTEM
+        # libraries chromium needs. A cache built on a different runner image
+        # (e.g. pre-ubuntu-24.04-pin, when ubuntu-latest was 26.04) holds
+        # browsers without matching host deps, and skipping this step is
+        # exactly how E2E failed on TIR-382 (install skipped -> launch
+        # failure -> exit 1 with no test output).
         run: npx playwright install --with-deps chromium
 
       - name: Run E2E tests
