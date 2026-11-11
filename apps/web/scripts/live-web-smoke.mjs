@@ -49,6 +49,9 @@ async function attempt(n) {
       () => document.getElementById('root') !== null,
       { timeout: 60_000 }
     )
+    // TIR-379 acceptance: prove the Dashboard actually mounted (not just that
+    // the nav button exists) before navigating away from it.
+    await page.waitForSelector('#dashboard-filter', { state: 'visible', timeout: 60_000 })
     await openSearchTab(page)
     await page.waitForSelector('#airport-search', { state: 'visible', timeout: 60_000 })
 
@@ -133,6 +136,19 @@ async function attempt(n) {
     await page.waitForSelector('#airport-search', { timeout: 30_000 })
     console.log('  offline: shell cached by the SW, mounted with the network down')
     await page.context().setOffline(false)
+
+    // Mobile viewport (TIR-379 acceptance): at 375px the app must still land
+    // on the Dashboard, reach Search & Report, and mount the search UI.
+    const mobile = await browser.newPage({ viewport: { width: 375, height: 812 } })
+    try {
+      await mobile.goto(BASE, { waitUntil: 'networkidle', timeout: 120_000 })
+      await mobile.waitForSelector('#dashboard-filter', { state: 'visible', timeout: 60_000 })
+      await openSearchTab(mobile)
+      await mobile.waitForSelector('#airport-search', { state: 'visible', timeout: 60_000 })
+      console.log('  mobile 375px: dashboard lands, Search & Report reachable, search UI mounts')
+    } finally {
+      await mobile.close()
+    }
 
     console.log(`[attempt ${n}] all live web checks passed`)
     return
