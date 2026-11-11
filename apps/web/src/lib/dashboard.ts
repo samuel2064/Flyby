@@ -118,3 +118,17 @@ export function formatAge(reportedAt: string | null, now: number = Date.now()): 
   if (hours < 48) return `${hours}h ago`
   return `${Math.floor(hours / 24)}d ago`
 }
+
+// TIR-390: the dashboard header must describe DATA age, not the page-fetch
+// time. The honest "as of" value is the newest report across all rows.
+export function newestReportedAt(
+  list: Pick<AirportSummary, 'latestReportedAt'>[],
+): string | null {
+  let newest = -Infinity
+  for (const a of list) {
+    if (!a.latestReportedAt) continue
+    const t = Date.parse(a.latestReportedAt)
+    if (Number.isFinite(t) && t > newest) newest = t
+  }
+  return newest === -Infinity ? null : new Date(newest).toISOString()
+}

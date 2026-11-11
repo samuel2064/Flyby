@@ -5,6 +5,7 @@ import {
   formatAverage,
   formatMinutes,
   isStale,
+  newestReportedAt,
   severityFor,
   sortBySeverity,
   STALE_AFTER_MS,
@@ -127,5 +128,25 @@ describe('staleness (TIR-343)', () => {
     expect(formatAge('2026-09-26T02:00:00Z', now)).toBe('10h ago')
     expect(formatAge('2026-09-24T00:00:00Z', now)).toBe('2d ago')
     expect(formatAge(null, now)).toBe('no recent report')
+  })
+
+  it('newestReportedAt returns the max report time across rows (TIR-390)', () => {
+    expect(
+      newestReportedAt([
+        summary({ latestReportedAt: '2026-09-26T10:00:00Z' }),
+        summary({ latestReportedAt: '2026-09-26T11:30:00Z' }),
+        summary({ latestReportedAt: '2026-09-26T09:15:00Z' }),
+      ]),
+    ).toBe('2026-09-26T11:30:00.000Z')
+  })
+
+  it('newestReportedAt ignores null/invalid and returns null when none', () => {
+    expect(newestReportedAt([])).toBe(null)
+    expect(
+      newestReportedAt([
+        summary({ latestReportedAt: null }),
+        summary({ latestReportedAt: 'not-a-date' }),
+      ]),
+    ).toBe(null)
   })
 })
