@@ -960,35 +960,35 @@ export const reportWaitTime = async (req: Request, res: Response) => {
   }
   minutes = minutesValidation.minutes;
 
-// Validate lineType first
-if (lineType !== undefined && lineType !== null) {
-  const lineTypeValidation = validateLineType(lineType);
-  if (!lineTypeValidation.valid) {
-    res.status(400).json({ error: lineTypeValidation.error });
-    return;
+  // Validate lineType first
+  if (lineType !== undefined && lineType !== null) {
+    const lineTypeValidation = validateLineType(lineType);
+    if (!lineTypeValidation.valid) {
+      res.status(400).json({ error: lineTypeValidation.error });
+      return;
+    }
+    reportType = lineTypeValidation.type;
   }
-  reportType = lineTypeValidation.type;
-}
-// Validate reportType if lineType not provided
-else if (req.body.reportType !== undefined && req.body.reportType !== null) {
-  const reportTypeValidation = validateReportType(req.body.reportType);
-  if (!reportTypeValidation.valid) {
-    res.status(400).json({ error: reportTypeValidation.error });
-    return;
+  // Validate reportType if lineType not provided
+  else if (req.body.reportType !== undefined && req.body.reportType !== null) {
+    const reportTypeValidation = validateReportType(req.body.reportType);
+    if (!reportTypeValidation.valid) {
+      res.status(400).json({ error: reportTypeValidation.error });
+      return;
+    }
+    reportType = reportTypeValidation.type;
   }
-  reportType = reportTypeValidation.type;
-}
-// Validate source if neither lineType nor reportType provided
-else if (req.body.source !== undefined && req.body.source !== null) {
-  const sourceValidation = validateSource(req.body.source);
-  if (!sourceValidation.valid) {
-    res.status(400).json({ error: sourceValidation.error });
-    return;
+  // Validate source if neither lineType nor reportType provided
+  else if (req.body.source !== undefined && req.body.source !== null) {
+    const sourceValidation = validateSource(req.body.source);
+    if (!sourceValidation.valid) {
+      res.status(400).json({ error: sourceValidation.error });
+      return;
+    }
+    source = sourceValidation.source;
+    reportType = "standard";
   }
-  source = sourceValidation.source;
-  reportType = "standard";
-}
-// If none provided, reportType remains "standard" and source defaults to "crowd" below
+  // If none provided, reportType remains "standard" and source defaults to "crowd" below
 
   // Validate reportedAt
   const reportedAtValidation = validateReportedAt(reportedAtValue);
@@ -1027,22 +1027,29 @@ else if (req.body.source !== undefined && req.body.source !== null) {
       userId = typeof dec?.sub === 'string' ? dec.sub : null;
     }
 
-    const waitTime = await prisma.waitTime.create({
-      data: {
-        checkpointId: id,
-        minutes: Math.round(minutes),
-        source: source === "official" ? "official" : "crowd",
-        reportType,
-        reportedAt: reportedAtValidation.date,
-        userId: userId ?? undefined,
-      },
+    // TIR-378: explicit transaction (parity with the deploy-repo persistence
+    // fix). A rejected insert surfaces in the catch below as 500; publishWaitTime
+    // and the 201 response only run after the commit, so a failed write is
+    // never reported as a successful traveler report.
+    const waitTime = await prisma.$transaction(async (tx) => {
+      const created = await tx.waitTime.create({
+        data: {
+          checkpointId: id,
+          minutes: Math.round(minutes),
+          source: source === "official" ? "official" : "crowd",
+          reportType,
+          reportedAt: reportedAtValidation.date,
+          userId: userId ?? undefined,
+        },
+      });
+      return created;
     });
 
     // Update session report count
     const session = getOrCreateSession(req);
     session.reportsSubmitted += 1;
 
-    // Publish to Redis for SSE subscribers
+    // TIR-378: broadcast only after the insert committed; a failed write never reaches here.
     await publishWaitTime({
       checkpointId: id,
       minutes,

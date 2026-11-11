@@ -183,18 +183,24 @@ export const postWaitTimeCompat = async (req: Request, res: Response) => {
     }
 
     const receivedAt = new Date();
-    const waitTime = await prisma.waitTime.create({
-      data: {
-        checkpointId: checkpoint.id,
-        minutes: Math.round(waitMinutesValue as number),
-        source: "crowd",
-        reportType,
-        reportedAt: receivedAt,
-      },
+    // TIR-378: explicit transaction (parity with the deploy-repo persistence
+    // fix). A rejected insert surfaces in the catch below as 500; publishWaitTime
+    // and the 201 response only run after the commit, so a failed write is
+    // never reported as a successful traveler report.
+    const waitTime = await prisma.$transaction(async (tx) => {
+      const created = await tx.waitTime.create({
+        data: {
+          checkpointId: checkpoint.id,
+          minutes: Math.round(waitMinutesValue as number),
+          source: "crowd",
+          reportType,
+          reportedAt: receivedAt,
+        },
+      });
+      return created;
     });
 
-    // Broadcast over the shared channel so both the native SSE routes and the
-    // compat /api/events listener see the report.
+    // TIR-378: broadcast only after the insert committed; a failed write never reaches here.
     await publishWaitTime({
       checkpointId: waitTime.checkpointId,
       minutes: waitTime.minutes,
