@@ -6,6 +6,7 @@ import {
   formatAge,
   formatMinutes,
   isStale,
+  newestReportedAt,
   severityFor,
   sortBySeverity,
   SEVERITY_SPECS,
@@ -28,13 +29,11 @@ export function Dashboard({ onSelectAirport }: DashboardProps) {
   const [airports, setAirports] = useState<AirportSummary[]>([])
   const [state, setState] = useState<FetchState>('loading')
   const [query, setQuery] = useState('')
-  const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
 
   const load = useCallback(async () => {
     try {
       const data = await getWaitTimesSummary()
       setAirports(data.airports)
-      setLastUpdated(new Date())
       setState('ready')
     } catch {
       setState('error')
@@ -52,6 +51,10 @@ export function Dashboard({ onSelectAirport }: DashboardProps) {
     [airports, query],
   )
 
+  // TIR-390: the header reflects DATA age (newest report across rows), never
+  // the page-fetch time - so a stale dashboard cannot read as freshly updated.
+  const newest = useMemo(() => newestReportedAt(airports), [airports])
+
   return (
     <section className="pt-8" aria-labelledby="dashboard-heading">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -67,8 +70,8 @@ export function Dashboard({ onSelectAirport }: DashboardProps) {
           </p>
         </div>
         <p aria-live="polite" className="text-xs text-slate-500">
-          {state === 'ready' && lastUpdated
-            ? `Updated ${lastUpdated.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} Â· refreshes every 60s`
+          {state === 'ready'
+            ? `Updated ${formatAge(newest)} Â· refreshes every 60s`
             : state === 'loading'
               ? 'Loadingâ€¦'
               : ''}
