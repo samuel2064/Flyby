@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <style>.mark{fill:#ffffff;}</style>
+  </defs>
+  <rect width="512" height="512" rx="80" fill="#0ea5e9"/>
+  <path class="mark" d="M154 182l48 48 32-32 22 22 64-64-80-80z"/>
+  <circle class="mark" cx="268" cy="240" r="16" opacity="0.9"/>
+</svg>

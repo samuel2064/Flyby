@@ -19,3 +19,6 @@ export { SubscriptionCheckout } from './SubscriptionCheckout'
 export { OnboardingStep } from './OnboardingStep'
 export { SettingsScreen } from './SettingsScreen'
 export { FeatureHighlight } from './FeatureHighlight'
+
+// TIR-440 empty & error states (namespaced to avoid clash with existing EmptyState/ErrorState)
+export * as states from './states'

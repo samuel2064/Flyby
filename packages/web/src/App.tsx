@@ -12,6 +12,7 @@ import Signup from './pages/Signup'
 import Profile from './pages/Profile'
 import ProtectedRoute from './components/ProtectedRoute'
 import ErrorBoundary from './components/ErrorBoundary'
+import { OnboardingFlow } from './onboarding/OnboardingFlow'
 
 interface BeforeInstallPromptEvent extends Event {
   prompt(): Promise<void>;
@@ -70,6 +71,23 @@ function AirportDetailRoute() {
 function App() {
   const { user, logout } = useAuth()
   const navigate = useNavigate()
+  const [onboardingComplete, setOnboardingComplete] = useState<boolean | null>(null)
+
+  useEffect(() => {
+    setOnboardingComplete(localStorage.getItem('flyby.onboarding.complete') === 'true')
+  }, [])
+
+  if (onboardingComplete === null) return null
+  if (!onboardingComplete) {
+    return (
+      <div className="min-h-screen bg-slate-50 dark:bg-slate-900">
+        <OnboardingFlow
+          onComplete={() => setOnboardingComplete(true)}
+          onSkip={() => setOnboardingComplete(true)}
+        />
+      </div>
+    )
+  }
 
   return (
     <div className="min-h-screen bg-gray-50 text-gray-900">

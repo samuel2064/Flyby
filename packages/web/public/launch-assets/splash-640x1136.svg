@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 1136">
+  <rect width="640" height="1136" fill="#0ea5e9"/>
+  <path d="M192 264l48 48 32-32 22 22 64-64-80-80z" fill="#ffffff"/>
+  <circle cx="336" cy="384" r="16" fill="#ffffff" opacity="0.9"/>
+  <text x="320" y="640" font-family="Inter,system-ui" font-size="48" font-weight="800" fill="#ffffff" text-anchor="middle">Flyby</text>
+  <text x="320" y="704" font-family="Inter,system-ui" font-size="24" font-weight="400" fill="#ffffff" text-anchor="middle">Know before you go.</text>
+</svg>
