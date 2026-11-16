@@ -51,9 +51,10 @@ test.describe("Airport detail stats page", () => {
   test("shows an error state for an unknown airport code", async ({ page }) => {
     await page.goto("/airport/ZZZ");
 
-    // The stats drill error state (NOTE: unlike PublicDashboard it currently
-    // has no Retry control — flagged as a UX follow-up on the TIR-363 lane).
+    // The stats drill error state includes a Retry control (TIR-363 UX
+    // follow-up, now closed — mirrors the PublicDashboard error card).
     await expect(page.getByText(/Could not load stats for ZZZ/)).toBeVisible({ timeout: 30_000 });
     await expect(page.getByText("The API may be waking up. Try again in a moment.")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Retry" })).toBeVisible();
   });
 });

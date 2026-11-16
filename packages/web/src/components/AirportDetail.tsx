@@ -55,6 +55,13 @@ export function AirportDetail({ code, summary, onBack }: AirportDetailProps) {
         <div className="mt-6 rounded-2xl border border-slate-200 bg-white p-6 text-center shadow-sm">
           <p className="text-sm font-semibold text-slate-900">Could not load stats for {code}.</p>
           <p className="mt-1 text-xs text-slate-500">The API may be waking up. Try again in a moment.</p>
+          <button
+            type="button"
+            onClick={() => void load()}
+            className="mt-4 inline-flex h-10 items-center justify-center rounded-xl border border-brand-500 bg-white px-4 text-sm font-semibold text-brand-700 transition hover:bg-brand-50 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+          >
+            Retry
+          </button>
         </div>
       )}
 

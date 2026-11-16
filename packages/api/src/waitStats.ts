@@ -138,6 +138,7 @@ function windowAverage(minutes: number[]): number | null {
   return Math.round((minutes.reduce((sum, m) => sum + m, 0) / minutes.length) * 10) / 10;
 }
 
+export { windowAverage };
 // Cross-airport summary. `airports` is code/name/timezone per airport (all
 // supported airports are included, even with zero reports - dashboards need
 // the full grid). `reports` is a Map of airport code -> report rows; now is
