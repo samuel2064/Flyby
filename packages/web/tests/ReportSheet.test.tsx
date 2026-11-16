@@ -51,7 +51,7 @@ describe('ReportSheet (checkpoint picker / first-report flow)', () => {
     render(<ReportSheet open={true} airportCode="JFK" onClose={() => {}} onReported={onReported} />)
 
     // Select a wait time
-    fireEvent.click(screen.getByRole('button', { name: /^15$/ }))
+    fireEvent.click(screen.getByRole('radio', { name: /^15$/ }))
     // Submit
     fireEvent.click(screen.getByRole('button', { name: /Submit report/i }))
 
@@ -76,11 +76,33 @@ describe('ReportSheet (checkpoint picker / first-report flow)', () => {
 
     render(<ReportSheet open={true} airportCode="JFK" onClose={() => {}} onReported={() => {}} />)
 
-    fireEvent.click(screen.getByRole('button', { name: /^15$/ }))
+    fireEvent.click(screen.getByRole('radio', { name: /^15$/ }))
     fireEvent.click(screen.getByRole('button', { name: /Submit report/i }))
 
     await waitFor(() => {
       expect(screen.getByText(/Thanks! Your report is live./)).toBeInTheDocument()
     })
+
+    await waitFor(() => {
+      expect(screen.getByText(/Thanks! Your report is live./)).toHaveAttribute('role', 'status')
+    })
+  })
+
+  it('labels the "60" preset as 60 not 60+', () => {
+    render(<ReportSheet open={true} airportCode="JFK" onClose={() => {}} onReported={() => {}} />)
+    expect(screen.getByRole('radio', { name: /^60$/ })).toBeInTheDocument()
+  })
+
+  it('validates custom minutes range and shows inline error', () => {
+    render(<ReportSheet open={true} airportCode="JFK" onClose={() => {}} onReported={() => {}} />)
+    fireEvent.click(screen.getByRole('radio', { name: /Custom/i }))
+    const input = screen.getByLabelText(/Custom wait time in minutes/i)
+    fireEvent.change(input, { target: { value: '999' } })
+    expect(screen.getByText(/Enter 1–180 minutes/)).toBeInTheDocument()
+  })
+
+  it('announces lane options as a radiogroup', () => {
+    render(<ReportSheet open={true} airportCode="JFK" onClose={() => {}} onReported={() => {}} />)
+    expect(screen.getByRole('radiogroup', { name: /Security lane/i })).toBeInTheDocument()
   })
 })

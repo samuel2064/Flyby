@@ -54,9 +54,20 @@ function getAccuracyColor(accuracy: number) {
   return "text-red-600";
 }
 
+function minutesAgo(iso: string | null): string | null {
+  if (!iso) return null
+  const ms = Date.now() - new Date(iso).getTime()
+  const min = Math.round(ms / 60000)
+  if (min < 1) return 'just now'
+  if (min === 1) return '1 min ago'
+  if (min < 60) return `${min} min ago`
+  const h = Math.round(min / 60)
+  return `${h}h ago`
+}
+
 export default function Dashboard() {
   const { isOnline, pendingCount } = useOfflineQueue()
-  const { data, loading, error } = useApi<DashboardData>("/api/dashboard", []);
+  const { data, loading, error, refetch } = useApi<DashboardData>("/api/dashboard", []);
   const [reportOpen, setReportOpen] = useState(false)
   const [selectedAirport, setSelectedAirport] = useState<string | null>(
     () => localStorage.getItem(STORAGE_KEY)
@@ -82,7 +93,7 @@ export default function Dashboard() {
   if (!isOnline) {
     return (
       <OfflineState
-        onRetry={() => {}}
+        onRetry={refetch}
         queuedCount={pendingCount}
       />
     )
@@ -102,9 +113,9 @@ export default function Dashboard() {
   if (error) {
     return (
       <NetworkErrorState
-        onRetry={() => {}}
+        onRetry={refetch}
         onReportAnyway={() => {
-          setSelectedAirport(DEFAULT_AIRPORT.code)
+          setSelectedAirport(selectedAirport ?? DEFAULT_AIRPORT.code)
           setReportOpen(true)
         }}
       />
@@ -123,7 +134,7 @@ export default function Dashboard() {
     .sort((a, b) => b.accuracy - a.accuracy);
 
   const handleReport = () => {
-    setSelectedAirport(DEFAULT_AIRPORT.code)
+    setSelectedAirport(selectedAirport ?? DEFAULT_AIRPORT.code)
     setReportOpen(true)
   }
 
@@ -131,9 +142,9 @@ export default function Dashboard() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <div>
-          <h2 className="text-2xl font-bold">Accuracy Metrics Dashboard</h2>
+          <h2 className="text-2xl font-bold">Wait times</h2>
           <p className="mt-1 text-sm text-slate-500">
-            Accuracy and processing metrics across all tracked checkpoints.
+            Latest crowd-sourced security wait times by checkpoint.
           </p>
         </div>
         <button
@@ -171,7 +182,42 @@ export default function Dashboard() {
         />
       )}
 
-      {/* Summary cards */}
+      {/* Per-checkpoint wait times — primary traveler view */}
+      <div className="bg-white rounded-lg shadow overflow-hidden">
+        <h3 className="text-lg font-semibold p-4 border-b">Checkpoint wait times</h3>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="bg-gray-50 text-left">
+                <th className="p-3 font-semibold text-gray-600">Airport</th>
+                <th className="p-3 font-semibold text-gray-600">Checkpoint</th>
+                <th className="p-3 font-semibold text-gray-600">Terminal</th>
+                <th className="p-3 font-semibold text-gray-600 text-right">Wait</th>
+                <th className="p-3 font-semibold text-gray-600 text-right">Reported</th>
+                <th className="p-3 font-semibold text-gray-600 text-right">Reports</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredCheckpoints.map((cp) => (
+                <tr key={cp.id} className="border-t hover:bg-gray-50 transition min-h-[44px]">
+                  <td className="p-3 font-medium">{cp.airportCode}</td>
+                  <td className="p-3">{cp.name}</td>
+                  <td className="p-3 text-gray-500">{cp.terminal || "—"}</td>
+                  <td className="p-3 text-right font-semibold">
+                    {cp.latestWaitTimeMinutes !== null ? `${cp.latestWaitTimeMinutes} min` : "—"}
+                  </td>
+                  <td className="p-3 text-right text-sm text-slate-500">
+                    {cp.latestReportedAt ? minutesAgo(cp.latestReportedAt) : "—"}
+                  </td>
+                  <td className="p-3 text-right text-gray-500">{cp.totalReports}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Summary cards — internal metrics, demoted below traveler view */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div className="bg-white rounded-lg shadow p-4">
           <p className="text-sm text-gray-500">Avg Accuracy</p>
@@ -193,7 +239,7 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Accuracy over time (line chart) */}
+      {/* Accuracy over time — internal metrics chart */}
       <div className="bg-white rounded-lg shadow p-4">
         <h3 className="text-lg font-semibold mb-4">Accuracy Score Over Time</h3>
         <ResponsiveContainer width="100%" height={250}>
@@ -213,7 +259,7 @@ export default function Dashboard() {
         </ResponsiveContainer>
       </div>
 
-      {/* Processing time per checkpoint (bar chart) */}
+      {/* Processing time per checkpoint — internal metrics chart */}
       <div className="bg-white rounded-lg shadow p-4">
         <h3 className="text-lg font-semibold mb-4">Processing Time per Checkpoint</h3>
         <ResponsiveContainer width="100%" height={300}>
@@ -227,46 +273,11 @@ export default function Dashboard() {
         </ResponsiveContainer>
       </div>
 
-      {/* Per-checkpoint breakdown table */}
-      <div className="bg-white rounded-lg shadow overflow-hidden">
-        <h3 className="text-lg font-semibold p-4 border-b">Per-Checkpoint Breakdown</h3>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="bg-gray-50 text-left">
-                <th className="p-3 font-semibold text-gray-600">Airport</th>
-                <th className="p-3 font-semibold text-gray-600">Checkpoint</th>
-                <th className="p-3 font-semibold text-gray-600">Terminal</th>
-                <th className="p-3 font-semibold text-gray-600 text-right">Accuracy</th>
-                <th className="p-3 font-semibold text-gray-600 text-right">Est. Wait</th>
-                <th className="p-3 font-semibold text-gray-600 text-right">Reports</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredCheckpoints.map((cp) => (
-                <tr key={cp.id} className="border-t hover:bg-gray-50 transition min-h-[44px]">
-                  <td className="p-3 font-medium">{cp.airportCode}</td>
-                  <td className="p-3">{cp.name}</td>
-                  <td className="p-3 text-gray-500">{cp.terminal || "—"}</td>
-                  <td className={`p-3 text-right font-semibold ${getAccuracyColor(cp.accuracy)}`}>
-                    {cp.accuracy}%
-                  </td>
-                  <td className="p-3 text-right">
-                    {cp.estimatedWaitTimeMinutes !== null ? `${cp.estimatedWaitTimeMinutes} min` : "—"}
-                  </td>
-                  <td className="p-3 text-right text-gray-500">{cp.totalReports}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
       <ReportSheet
         open={reportOpen}
         airportCode={selectedAirport ?? DEFAULT_AIRPORT.code}
         onClose={() => setReportOpen(false)}
-        onReported={() => setReportOpen(false)}
+        onReported={refetch}
       />
     </div>
   );

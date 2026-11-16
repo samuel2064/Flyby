@@ -153,7 +153,7 @@ describe("Dashboard page", () => {
     });
   });
 
-  it("renders accuracy section heading", async () => {
+  it("renders wait times heading", async () => {
     vi.spyOn(globalThis, "fetch" as any).mockImplementation(() =>
       Promise.resolve({
         ok: true,
@@ -170,11 +170,11 @@ describe("Dashboard page", () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByText("Accuracy Metrics Dashboard")).toBeDefined();
+      expect(screen.getByText("Wait times")).toBeDefined();
     });
   });
 
-  it("renders per-checkpoint breakdown table", async () => {
+  it("renders checkpoint wait times table", async () => {
     vi.spyOn(globalThis, "fetch" as any).mockImplementation(() =>
       Promise.resolve({
         ok: true,
@@ -193,8 +193,27 @@ describe("Dashboard page", () => {
     await waitFor(() => {
       expect(screen.getByText("Terminal 1 Checkpoint A")).toBeDefined();
       expect(screen.getByText("Terminal 2 Checkpoint B")).toBeDefined();
-      expect(screen.getByText("88%")).toBeDefined();
-      expect(screen.getByText("72%")).toBeDefined();
+    });
+  });
+
+  it("shows wait time and freshness in table", async () => {
+    vi.spyOn(globalThis, "fetch" as any).mockImplementation(() =>
+      Promise.resolve({
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        json: () => Promise.resolve(mockDashboardData),
+      })
+    );
+
+    render(
+      <TestBrowserRouter>
+        <Dashboard />
+      </TestBrowserRouter>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("12 min")).toBeDefined();
     });
   });
 
@@ -239,8 +258,8 @@ describe("Dashboard page", () => {
       expect(screen.getByText("Airport")).toBeDefined();
       expect(screen.getByText("Checkpoint")).toBeDefined();
       expect(screen.getByText("Terminal")).toBeDefined();
-      expect(screen.getByText("Accuracy")).toBeDefined();
-      expect(screen.getByText("Est. Wait")).toBeDefined();
+      expect(screen.getByText("Wait")).toBeDefined();
+      expect(screen.getByText("Reported")).toBeDefined();
       expect(screen.getByText("Reports")).toBeDefined();
     });
   });
@@ -283,7 +302,7 @@ describe("Dashboard page", () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByText("Accuracy Metrics Dashboard")).toBeDefined();
+      expect(screen.getByText("Wait times")).toBeDefined();
       expect(screen.getByText("Accuracy Score Over Time")).toBeDefined();
     });
   });
@@ -306,11 +325,11 @@ describe("Dashboard page", () => {
 
     await waitFor(() => {
       expect(screen.getByText("Processing Time per Checkpoint")).toBeDefined();
-      expect(screen.getByText("Per-Checkpoint Breakdown")).toBeDefined();
+      expect(screen.getByText("Checkpoint wait times")).toBeDefined();
     });
   });
 
-  it("renders red accuracy color for low accuracy (< 40)", async () => {
+  it("renders red accuracy color for low accuracy (< 40) in summary card", async () => {
     vi.spyOn(globalThis, "fetch" as any).mockImplementation(() =>
       Promise.resolve({
         ok: true,
@@ -327,20 +346,23 @@ describe("Dashboard page", () => {
     );
 
     await waitFor(() => {
-      // Find the 35% in the table (not the summary card)
-      const tableCell = screen.getByText("Low Accuracy Checkpoint").closest("tr")?.querySelector("td:nth-child(4)");
-      expect(tableCell).toBeDefined();
-      expect(tableCell).toHaveClass("text-red-600");
+      expect(screen.getByText("35%")).toHaveClass("text-red-600");
     });
   });
 
-  it("renders yellow accuracy color for medium accuracy (40-69)", async () => {
+  it("renders yellow accuracy color for medium accuracy (40-69) in summary card", async () => {
+    const yellowData = {
+      data: {
+        ...mockDashboardDataLowAccuracy.data,
+        summary: { ...mockDashboardDataLowAccuracy.data.summary, avgAccuracy: 55 },
+      },
+    };
     vi.spyOn(globalThis, "fetch" as any).mockImplementation(() =>
       Promise.resolve({
         ok: true,
         status: 200,
         statusText: "OK",
-        json: () => Promise.resolve(mockDashboardDataLowAccuracy),
+        json: () => Promise.resolve(yellowData),
       })
     );
 
@@ -351,14 +373,11 @@ describe("Dashboard page", () => {
     );
 
     await waitFor(() => {
-      // Find the 55% in the table (not the summary card)
-      const tableCell = screen.getByText("Medium Accuracy Checkpoint").closest("tr")?.querySelector("td:nth-child(4)");
-      expect(tableCell).toBeDefined();
-      expect(tableCell).toHaveClass("text-yellow-600");
+      expect(screen.getByText("55%")).toHaveClass("text-yellow-600");
     });
   });
 
-  it("renders green accuracy color for high accuracy (>= 70)", async () => {
+  it("renders green accuracy color for high accuracy (>= 70) in summary card", async () => {
     vi.spyOn(globalThis, "fetch" as any).mockImplementation(() =>
       Promise.resolve({
         ok: true,
@@ -375,10 +394,7 @@ describe("Dashboard page", () => {
     );
 
     await waitFor(() => {
-      // Find the 88% in the table (first checkpoint)
-      const tableCell = screen.getByText("Terminal 1 Checkpoint A").closest("tr")?.querySelector("td:nth-child(4)");
-      expect(tableCell).toBeDefined();
-      expect(tableCell).toHaveClass("text-green-600");
+      expect(screen.getByText("85%")).toHaveClass("text-green-600");
     });
   });
 
@@ -420,7 +436,7 @@ describe("Dashboard page", () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByText("—")).toBeDefined();
+      expect(screen.getAllByText("—").length).toBeGreaterThan(0);
     });
   });
 });

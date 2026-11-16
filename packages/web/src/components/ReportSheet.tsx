@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef, useCallback } from 'react'
 import { submitWaitTimeReport } from '../api/waitTimes'
 import { checkpointOptions } from '../data/airports'
 import { canSubmitReport, effectiveCheckpointPick } from '../lib/reportCheckpoint'
@@ -10,9 +10,6 @@ import { waitLevel } from '../api/types'
 interface ReportSheetProps {
   open: boolean
   airportCode: string
-  // Fixed checkpoint (card flow). Omit for picker mode: the traveler chooses
-  // from the airport's real checkpoints - the only way to file the FIRST
-  // report at an airport or for a terminal that has no card yet.
   checkpoint?: string
   onClose: () => void
   onReported: () => void
@@ -20,12 +17,13 @@ interface ReportSheetProps {
 
 const WAIT_OPTIONS: number[] = [5, 10, 15, 20, 30, 45, 60]
 
-// Traveler-facing label per stored lane value; "standard" reads as "Standard".
 const LANE_BUTTON_LABELS: Record<LaneType, string> = {
   standard: 'Standard',
   preclear: 'TSA PreCheck',
   clear: 'CLEAR',
 }
+
+const CUSTOM_MAX_MINUTES = 180
 
 export function ReportSheet({
   open,
@@ -38,22 +36,19 @@ export function ReportSheet({
   const [pickedCheckpoint, setPickedCheckpoint] = useState<string>('')
   const [minutes, setMinutes] = useState<number>(15)
   const [customMinutes, setCustomMinutes] = useState<string>('')
+  const [customError, setCustomError] = useState<string | null>(null)
   const [isCustom, setIsCustom] = useState(false)
   const [lane, setLane] = useState<LaneType>('standard')
   const [submitting, setSubmitting] = useState(false)
   const [submitted, setSubmitted] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [returnFocus, setReturnFocus] = useState<HTMLElement | null>(null)
+  const dialogRef = useRef<HTMLDivElement | null>(null)
 
-  // The sheet stays mounted while open/close toggles, so a pick from a
-  // previous airport must never leak into this one: fall back to the first
-  // option whenever the stored pick is not valid for the current airport.
   const effectivePick = effectiveCheckpointPick(pickedCheckpoint, options)
   const activeCheckpoint = checkpoint ?? effectivePick
   const canSubmit = canSubmitReport(activeCheckpoint)
 
-  // Rate-limit feedback: a 429 gives the countdown window; the submit button
-  // stays disabled while it ticks down.
   const [rateLimitUntil, setRateLimitUntil] = useState<number | null>(null)
   const [nowTick, setNowTick] = useState(() => Date.now())
 
@@ -64,8 +59,10 @@ export function ReportSheet({
     return () => window.clearInterval(timer)
   }, [rateLimitUntil])
 
-  // Focus management: restore focus to the element that opened the modal,
-  // and close on Escape.
+  const secondsLeft =
+    rateLimitUntil === null ? 0 : Math.max(0, Math.ceil((rateLimitUntil - nowTick) / 1000))
+  const rateLimited = rateLimitUntil !== null && secondsLeft > 0
+
   useEffect(() => {
     if (!open) return
     setReturnFocus(document.activeElement as HTMLElement | null)
@@ -79,23 +76,36 @@ export function ReportSheet({
     }
   }, [open, onClose, returnFocus])
 
-  const secondsLeft =
-    rateLimitUntil === null ? 0 : Math.max(0, Math.ceil((rateLimitUntil - nowTick) / 1000))
-  const rateLimited = rateLimitUntil !== null && secondsLeft > 0
+  useEffect(() => {
+    if (!open || !dialogRef.current) return
+    const focusable = dialogRef.current.querySelector<HTMLElement>(
+      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+    )
+    focusable?.focus()
+  }, [open])
 
-  if (!open) return null
+  const handleCustomChange = useCallback((value: string) => {
+    setCustomMinutes(value)
+    setCustomError(null)
+    const v = parseInt(value, 10)
+    if (value === '') return
+    if (isNaN(v) || v < 1 || v > CUSTOM_MAX_MINUTES) {
+      setCustomError(`Enter 1–${CUSTOM_MAX_MINUTES} minutes`)
+      return
+    }
+    setMinutes(v)
+  }, [])
 
-  async function handleSubmit() {
+  const handleSubmit = useCallback(async () => {
     if (!canSubmit) return
     setSubmitting(true)
     setError(null)
+    setCustomError(null)
     try {
       await submitWaitTimeReport({
         airport: airportCode,
         checkpoint: activeCheckpoint,
         waitMinutes: minutes,
-        // Standard lanes stay off the wire (deploy-era default); expedited
-        // lanes are the signal worth persisting (TIR-367).
         ...(lane !== 'standard' ? { reportType: lane } : {}),
       })
       setSubmitted(true)
@@ -115,15 +125,18 @@ export function ReportSheet({
     } finally {
       setSubmitting(false)
     }
-  }
+  }, [canSubmit, airportCode, activeCheckpoint, minutes, lane, onReported, onClose])
 
   const level: WaitLevel = waitLevel(minutes)
+
+  if (!open) return null
 
   return (
     <div
       role="dialog"
       aria-modal="true"
       aria-labelledby="report-sheet-title"
+      ref={dialogRef}
       className="fixed inset-0 z-30 flex items-end justify-center sm:items-center"
     >
       <button
@@ -163,7 +176,12 @@ export function ReportSheet({
         </div>
 
         {submitted ? (
-          <p className="mt-6 rounded-xl bg-emerald-50 p-4 text-sm font-semibold text-emerald-900">
+          <p
+            id="report-sheet-confirmation"
+            role="status"
+            aria-live="polite"
+            className="mt-6 rounded-xl bg-emerald-50 p-4 text-sm font-semibold text-emerald-900"
+          >
             Thanks! Your report is live.
           </p>
         ) : (
@@ -191,30 +209,37 @@ export function ReportSheet({
               <legend className="text-sm font-semibold text-slate-700">
                 How long is the line right now?
               </legend>
-              <div className="mt-3 grid grid-cols-4 gap-2">
+              <div
+                role="radiogroup"
+                aria-label="Wait time"
+                className="mt-3 grid grid-cols-4 gap-2"
+              >
                 {WAIT_OPTIONS.map((option) => (
                   <button
                     key={option}
                     type="button"
+                    role="radio"
+                    aria-checked={minutes === option && !isCustom}
                     onClick={() => {
                       setMinutes(option)
                       setIsCustom(false)
+                      setCustomError(null)
                     }}
-                    aria-pressed={minutes === option && !isCustom}
                     className={`h-12 rounded-xl border text-sm font-semibold transition focus:outline-none focus:ring-2 focus:ring-brand-500/40 ${
                       minutes === option && !isCustom
                         ? 'border-brand-500 bg-brand-500 text-white'
                         : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
                     }`}
                   >
-                    {option === 60 ? '60+' : option}
+                    {option === 60 ? '60' : option}
                   </button>
                 ))}
                 <button
                   key="custom"
                   type="button"
+                  role="radio"
+                  aria-checked={isCustom}
                   onClick={() => setIsCustom(true)}
-                  aria-pressed={isCustom}
                   className={`h-12 rounded-xl border text-sm font-semibold transition focus:outline-none focus:ring-2 focus:ring-brand-500/40 ${
                     isCustom ? 'border-brand-500 bg-brand-500 text-white' : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
                   }`}
@@ -224,30 +249,44 @@ export function ReportSheet({
               </div>
               {isCustom && (
                 <div className="mt-3">
+                  <label htmlFor="custom-minutes" className="sr-only">
+                    Custom wait time in minutes
+                  </label>
                   <input
+                    id="custom-minutes"
                     type="number"
                     min="1"
-                    placeholder="Minutes"
+                    max={CUSTOM_MAX_MINUTES}
+                    aria-label="Custom wait time in minutes"
+                    aria-invalid={customError !== null ? true : undefined}
+                    aria-errormessage={customError ? 'custom-minutes-error' : undefined}
                     value={customMinutes}
-                    onChange={(e) => setCustomMinutes(e.target.value)}
-                    onBlur={() => {
-                      const v = parseInt(customMinutes, 10)
-                      if (!isNaN(v) && v > 0) setMinutes(v)
-                    }}
+                    onChange={(e) => handleCustomChange(e.target.value)}
                     className="h-12 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
                   />
+                  {customError && (
+                    <p id="custom-minutes-error" role="alert" className="mt-1 rounded-xl bg-red-50 p-2 text-xs text-red-900">
+                      {customError}
+                    </p>
+                  )}
                 </div>
               )}
             </fieldset>
             <fieldset className="mt-4">
               <legend className="text-sm font-semibold text-slate-700">Which lane are you in?</legend>
-              <div className="mt-3 grid grid-cols-3 gap-2" data-testid="lane-type-picker">
+              <div
+                role="radiogroup"
+                aria-label="Security lane"
+                className="mt-3 grid grid-cols-3 gap-2"
+                data-testid="lane-type-picker"
+              >
                 {LANE_TYPES.map((type) => (
                   <button
                     key={type}
                     type="button"
+                    role="radio"
+                    aria-checked={lane === type}
                     onClick={() => setLane(type)}
-                    aria-pressed={lane === type}
                     data-testid={`lane-${type}`}
                     className={`h-12 rounded-xl border text-sm font-semibold transition focus:outline-none focus:ring-2 focus:ring-brand-500/40 ${
                       lane === type
