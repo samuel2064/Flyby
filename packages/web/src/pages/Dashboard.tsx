@@ -199,7 +199,11 @@ export default function Dashboard() {
             </thead>
             <tbody>
               {filteredCheckpoints.map((cp) => (
-                <tr key={cp.id} className="border-t hover:bg-gray-50 transition min-h-[44px]">
+                <tr
+                  key={cp.id}
+                  className="border-t hover:bg-gray-50 transition min-h-[44px] cursor-pointer"
+                  onClick={() => setSelectedAirport(cp.airportCode)}
+                >
                   <td className="p-3 font-medium">{cp.airportCode}</td>
                   <td className="p-3">{cp.name}</td>
                   <td className="p-3 text-gray-500">{cp.terminal || "—"}</td>

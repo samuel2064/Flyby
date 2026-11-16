@@ -67,7 +67,22 @@ export function ReportSheet({
     if (!open) return
     setReturnFocus(document.activeElement as HTMLElement | null)
     const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
+      if (e.key === 'Escape') {
+        onClose()
+        return
+      }
+      if (e.key === 'Tab' && dialogRef.current) {
+        e.preventDefault()
+        const focusables = Array.from(
+          dialogRef.current.querySelectorAll<HTMLElement>(
+            'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+          )
+        )
+        const current = document.activeElement as HTMLElement | null
+        const idx = focusables.indexOf(current ?? focusables[0])
+        const next = focusables[(idx + 1) % focusables.length]
+        next?.focus()
+      }
     }
     window.addEventListener('keydown', handler)
     return () => {
@@ -78,10 +93,7 @@ export function ReportSheet({
 
   useEffect(() => {
     if (!open || !dialogRef.current) return
-    const focusable = dialogRef.current.querySelector<HTMLElement>(
-      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
-    )
-    focusable?.focus()
+    dialogRef.current.focus()
   }, [open])
 
   const handleCustomChange = useCallback((value: string) => {
@@ -113,7 +125,7 @@ export function ReportSheet({
       window.setTimeout(() => {
         setSubmitted(false)
         onClose()
-      }, 1200)
+      }, 2000)
     } catch (err) {
       const seconds = extractRateLimitSeconds(err)
       if (seconds !== null) {
@@ -145,7 +157,10 @@ export function ReportSheet({
         onClick={onClose}
         className="absolute inset-0 bg-slate-900/50"
       />
-      <div className="relative w-full rounded-t-3xl bg-white p-5 shadow-2xl sm:max-w-md sm:rounded-3xl">
+      <div
+        tabIndex={-1}
+        className="relative w-full rounded-t-3xl bg-white p-5 shadow-2xl sm:max-w-md sm:rounded-3xl"
+      >
         <div className="mx-auto mb-4 h-1.5 w-10 rounded-full bg-slate-200 sm:hidden" />
         <div className="flex items-start justify-between">
           <div>
