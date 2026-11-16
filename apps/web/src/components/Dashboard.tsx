@@ -17,15 +17,14 @@ const AUTO_REFRESH_MS = 60_000
 type FetchState = 'loading' | 'ready' | 'error'
 
 interface DashboardProps {
-  // Passes the whole summary row: the drill needs latestReportedAt for its
-  // staleness indicator (TIR-343) and the stats endpoint does not carry it.
   onSelectAirport: (airport: AirportSummary) => void
+  onReportWaitTime: (airportCode: string) => void
 }
 
 // Landing dashboard (TIR-317): severity-bucketed overview of every tracked
 // airport, longest waits first, 60s auto-refresh. Data comes from the live
 // aggregate endpoint; no row ever exposes a reporter identity (TIR-309).
-export function Dashboard({ onSelectAirport }: DashboardProps) {
+export function Dashboard({ onSelectAirport, onReportWaitTime }: DashboardProps) {
   const [airports, setAirports] = useState<AirportSummary[]>([])
   const [state, setState] = useState<FetchState>('loading')
   const [query, setQuery] = useState('')
@@ -69,16 +68,26 @@ export function Dashboard({ onSelectAirport }: DashboardProps) {
             Latest crowdsourced security wait at every tracked airport, longest lines first.
           </p>
         </div>
-        <p aria-live="polite" className="text-xs text-slate-500">
-          {state === 'ready'
-            ? `Updated ${formatAge(newest)} Â· refreshes every 60s`
-            : state === 'loading'
-              ? 'Loadingâ€¦'
-              : ''}
-        </p>
+        <button
+          type="button"
+          data-testid="dashboard-report-button"
+          onClick={() => onReportWaitTime('')}
+          className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center gap-2 rounded-xl bg-brand-500 px-4 py-3 text-sm font-semibold text-white transition hover:bg-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+        >
+          Report a wait time
+        </button>
       </div>
 
-      <div className="mt-5">
+      <p aria-live="polite" className="text-xs text-slate-500">
+        {state === 'ready'
+          ? `Updated ${formatAge(newest)} · refreshes every 60s`
+          : state === 'loading'
+            ? 'Loading…'
+            : ''}
+      </p>
+
+      {/* Prominent airport search: large input at the top of results (TIR-405 Task 5). */}
+      <div className="mt-6">
         <label htmlFor="dashboard-filter" className="sr-only">
           Filter airports by code or name
         </label>
@@ -87,8 +96,8 @@ export function Dashboard({ onSelectAirport }: DashboardProps) {
           type="search"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Filter airports (e.g. JFK or Denver)â€¦"
-          className="w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm text-slate-900 shadow-sm placeholder:text-slate-500 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+          placeholder="Search airports (e.g. JFK, Denver, LAX)…"
+          className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 shadow-sm placeholder:text-slate-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/40 sm:text-base sm:px-5 sm:py-3.5"
         />
       </div>
 
@@ -102,7 +111,7 @@ export function Dashboard({ onSelectAirport }: DashboardProps) {
           <button
             type="button"
             onClick={() => void load()}
-            className="mt-4 inline-flex h-10 items-center justify-center rounded-xl border border-brand-500 bg-white px-4 text-sm font-semibold text-brand-700 transition hover:bg-brand-50 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+            className="mt-4 inline-flex min-h-[44px] items-center justify-center rounded-xl border border-brand-500 bg-white px-4 text-sm font-semibold text-brand-700 transition hover:bg-brand-50 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
           >
             Retry
           </button>
@@ -110,7 +119,7 @@ export function Dashboard({ onSelectAirport }: DashboardProps) {
       )}
 
       {state === 'ready' && (
-        <ul className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2" data-testid="dashboard-list">
+        <ul className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2" data-testid="dashboard-list">
           {visible.map((a) => {
             const severity = severityFor(a.latestWaitMinutes)
             const spec = SEVERITY_SPECS[severity]
@@ -121,7 +130,7 @@ export function Dashboard({ onSelectAirport }: DashboardProps) {
                 <button
                   type="button"
                   onClick={() => onSelectAirport(a)}
-                  aria-label={`${a.airportName}: ${spec.label}, latest wait ${formatMinutes(a.latestWaitMinutes)} reported ${age}${stale && a.latestReportedAt ? ' (stale)' : ''}, ${a.sampleSize} reports. View details.`}
+                  aria-label={`${a.airport}: ${spec.label}, latest wait ${formatMinutes(a.latestWaitMinutes)} reported ${age}${stale && a.latestReportedAt ? ' (stale)' : ''}, ${a.sampleSize} reports. View details.`}
                   className="flex min-h-11 w-full items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:border-brand-500/50 hover:shadow focus:outline-none focus:ring-2 focus:ring-brand-500/40"
                 >
                   <div className="min-w-0">
@@ -145,9 +154,7 @@ export function Dashboard({ onSelectAirport }: DashboardProps) {
                     <p className="mt-0.5 truncate text-xs text-slate-500">{a.airportName}</p>
                   </div>
                   <div className="shrink-0 text-right">
-                    {/* TIR-343: stale readings are de-emphasized and always
-                        carry their age - never presented as fresh. */}
-                    <p className={`text-lg font-bold ${stale ? 'text-slate-500' : 'text-slate-900'}`}>
+                    <p className={`text-lg font-bold ${stale ? 'text-slate-400' : 'text-slate-900'}`}>
                       {formatMinutes(a.latestWaitMinutes)}
                     </p>
                     <p className={`text-xs ${stale ? 'font-medium text-slate-500' : 'text-slate-500'}`}>
@@ -157,6 +164,17 @@ export function Dashboard({ onSelectAirport }: DashboardProps) {
                       {a.sampleSize} report{a.sampleSize === 1 ? '' : 's'}
                     </p>
                   </div>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      onReportWaitTime(a.airport)
+                    }}
+                    aria-label={`Report wait time at ${a.airport} (${a.airportName})`}
+                    className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-xl bg-brand-50 px-2 text-xs font-semibold text-brand-700 transition hover:bg-brand-100 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+                  >
+                    Report
+                  </button>
                 </button>
               </li>
             )
