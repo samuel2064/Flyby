@@ -30,7 +30,14 @@ jobs:
         run: npm test
 
       - name: Start API and verify health
+        # TIR-364: production (Render) boots with VAPID_PUBLIC_KEY set, and the
+        # API refuses to serve a hardcoded fallback key when it is missing.
+        # Boot the smoke instance with a valid test key (65-byte P-256
+        # base64url) so the "configured" push-notification contract below is
+        # exercised; the "unconfigured -> 503" contract gets its own boot in
+        # the vapid-contract step.
         run: |
+          export VAPID_PUBLIC_KEY="BCk8ZxoXeDsnZCZYoBqkjUpE6hXCSqd1pYbbB-VDdQlfpQ3HApmBuhqFyX6SCpZzVI5BvBrloTVdjOiT3bw3k7E"
           node server.js &
           for i in $(seq 1 30); do
             if curl -sf http://127.0.0.1:3000/api/health -o /tmp/health.json; then
@@ -54,7 +61,9 @@ jobs:
           grep -q '"Airport not found"' /tmp/wt_unknown.json
           # Known airports still respond 200 (report data only, possibly empty)
           curl -sf "http://127.0.0.1:3000/api/wait-times?airport=SEA" -o /tmp/wt_sea.json
-          curl -sf http://127.0.0.1:3000/api/notifications/vapid-public-key | grep -q '"publicKey"'
+          # TIR-364 (configured path): the boot sets VAPID_PUBLIC_KEY, so the
+          # endpoint must serve exactly that key - not a fallback, not 503.
+          curl -sf http://127.0.0.1:3000/api/notifications/vapid-public-key | grep -q '"publicKey":"BCk8ZxoXeDsnZCZYoBqkjUpE6hXCSqd1pYbbB-VDdQlfpQ3HApmBuhqFyX6SCpZzVI5BvBrloTVdjOiT3bw3k7E"'
           # TIR-299: admin delete route must exist and be fail-closed. This boot
           # has no ADMIN_API_KEY, so DELETE must answer 503 (never 404 catch-all).
           code=$(curl -s -o /tmp/del_unauth.json -w '%{http_code}' -X DELETE "http://127.0.0.1:3000/api/reports/rpt_123")
@@ -89,6 +98,27 @@ jobs:
           fi
           grep -q '"Checkpoint not found"' /tmp/pred_unk.json
           echo "Mock endpoints OK"
+
+      - name: Verify VAPID fail-closed contract (TIR-364)
+        # Second boot with NO VAPID_PUBLIC_KEY: the endpoint must answer 503
+        # naming the missing config - never a fabricated key, never a crash.
+        run: |
+          unset VAPID_PUBLIC_KEY
+          PORT=3789 node server.js &
+          SERVER3_PID=$!
+          trap 'kill $SERVER3_PID 2>/dev/null || true' EXIT
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:3789/api/health >/dev/null && break
+            sleep 1
+          done
+          code=$(curl -s -o /tmp/vapid_unconf.json -w '%{http_code}' http://127.0.0.1:3789/api/notifications/vapid-public-key)
+          if [ "$code" != "503" ]; then
+            echo "Expected 503 for vapid-public-key without VAPID_PUBLIC_KEY, got $code"
+            cat /tmp/vapid_unconf.json
+            exit 1
+          fi
+          grep -q 'VAPID_PUBLIC_KEY is not set' /tmp/vapid_unconf.json
+          echo "VAPID fail-closed contract OK"
 
       - name: Verify admin delete contract with a key configured (TIR-299)
         run: |
