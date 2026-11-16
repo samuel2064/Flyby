@@ -46,6 +46,23 @@ jobs:
           }
 
           probe "/api/health" '"status":"ok"'
+
+          if [ "$GITHUB_EVENT_NAME" = "schedule" ]; then
+            code=$(curl -s -D /tmp/cors_allowed_headers -o /dev/null -w '%{http_code}' --max-time 90 -H 'Origin: https://flyby-web.onrender.com' "$BASE_URL/api/airports" || echo 000)
+            if [ "$code" != "200" ] || ! grep -qi '^access-control-allow-origin: https://flyby-web.onrender.com' /tmp/cors_allowed_headers; then
+              fail "Production web origin did not receive an exact CORS allow header"
+            fi
+            code=$(curl -s -D /tmp/cors_disallowed_headers -o /dev/null -w '%{http_code}' --max-time 90 -H 'Origin: https://attacker.example' "$BASE_URL/api/airports" || echo 000)
+            if [ "$code" != "200" ] || grep -qi '^access-control-allow-origin:' /tmp/cors_disallowed_headers; then
+              fail "Unconfigured origin received a CORS allow header"
+            fi
+            code=$(curl -s -o /tmp/cors_preflight.json -w '%{http_code}' --max-time 90 -X OPTIONS -H 'Origin: https://attacker.example' -H 'Access-Control-Request-Method: POST' "$BASE_URL/api/wait-times" || echo 000)
+            if [ "$code" != "403" ]; then
+              fail "Unconfigured-origin preflight returned HTTP $code (expected 403)"
+            fi
+            echo "OK    CORS restricted to the production web origin"
+          fi
+
           probe "/api/airports" '"airports"'
           probe "/api/airports/JFK" '"code":"JFK"'
           probe "/api/checkpoints?airport=JFK" '"checkpoints"'
@@ -125,6 +142,8 @@ jobs:
 
   live-web-smoke:
     name: Live web smoke
+    env:
+      LIVE_WEB_REQUIRE_DEPLOYED_CONTRACT: ${{ github.event_name == 'schedule' }}
     # Pin a Playwright-supported OS. `ubuntu-latest` now resolves to 26.04,
     # where Playwright 1.60.0 cannot install chromium dependencies:
     # "ERROR: Playwright does not support chromium on ubuntu26.04-x64" (TIR-379).

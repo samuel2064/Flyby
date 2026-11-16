@@ -1,0 +1,34 @@
+name: Render keep-alive
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: render-keep-alive
+  cancel-in-progress: true
+
+jobs:
+  keep-alive:
+    name: Keep Render services warm
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Ping API and web
+        run: |
+          set -euo pipefail
+          for url in \
+            https://flyby-api.onrender.com/api/health \
+            https://flyby-web.onrender.com/
+          do
+            code=$(curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 30 --max-time 180 --retry 3 --retry-delay 15 --retry-all-errors "$url")
+            if [ "$code" != "200" ]; then
+              echo "::error::Keep-alive ping failed for $url with HTTP $code"
+              exit 1
+            fi
+            echo "OK $url"
+          done

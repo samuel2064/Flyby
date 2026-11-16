@@ -30,6 +30,8 @@ jobs:
         run: npm test
 
       - name: Start API and verify health
+        env:
+          VAPID_PUBLIC_KEY: ci-vapid-public-key
         run: |
           node server.js &
           for i in $(seq 1 30); do
