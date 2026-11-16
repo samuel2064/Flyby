@@ -195,13 +195,16 @@ export default function Dashboard() {
                 <th className="p-3 font-semibold text-gray-600 text-right">Wait</th>
                 <th className="p-3 font-semibold text-gray-600 text-right">Reported</th>
                 <th className="p-3 font-semibold text-gray-600 text-right">Reports</th>
+                <th className="p-3 font-semibold text-gray-600 text-right sr-only">
+                  Action
+                </th>
               </tr>
             </thead>
             <tbody>
               {filteredCheckpoints.map((cp) => (
                 <tr
                   key={cp.id}
-                  className={`border-t hover:bg-gray-50 transition cursor-pointer ${cp.airportCode === selectedAirport ? 'bg-brand-50' : ''}`}
+                  className={`border-t transition cursor-pointer ${cp.airportCode === selectedAirport ? 'bg-brand-50' : 'hover:bg-gray-50'}`}
                   onClick={() => setSelectedAirport(cp.airportCode)}
                 >
                   <td className="p-3 font-medium">{cp.airportCode}</td>
@@ -222,7 +225,7 @@ export default function Dashboard() {
                         setSelectedAirport(cp.airportCode)
                         setReportOpen(true)
                       }}
-                      className="h-10 px-3 rounded-xl border border-slate-300 bg-white text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-brand-500/40 hover:bg-slate-50"
+                      className="h-11 px-3 rounded-xl border border-slate-300 bg-white text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-brand-500/40 hover:bg-slate-50"
                     >
                       Report
                     </button>
