@@ -61,6 +61,11 @@ services:
       - .env.docker
     volumes:
       - ./apps/api:/app:cached
+      # Keep the image's node_modules (nodemon, prisma client) reachable. The
+      # bind mount above shadows /app, so without this the container cannot
+      # start `npm run dev` and crash-loops. That crash fails the Codespaces
+      # prebuild check, which blocks Render's wait-for-CI deploy of flyby-web.
+      - /app/node_modules
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-flyby}:${POSTGRES_PASSWORD:-flyby}@postgres:5432/${POSTGRES_DB:-flyby}
       NODE_ENV: development
