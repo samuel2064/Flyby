@@ -201,8 +201,17 @@ export default function Dashboard() {
               {filteredCheckpoints.map((cp) => (
                 <tr
                   key={cp.id}
-                  className="border-t hover:bg-gray-50 transition min-h-[44px] cursor-pointer"
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`Select ${cp.airportCode}, ${cp.name}, ${cp.latestWaitTimeMinutes !== null ? cp.latestWaitTimeMinutes + ' minute wait' : 'no wait reported'}`}
+                  className="border-t hover:bg-gray-50 transition min-h-[44px] cursor-pointer focus:outline-none focus:ring-2 focus:ring-brand-500/40"
                   onClick={() => setSelectedAirport(cp.airportCode)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault()
+                      setSelectedAirport(cp.airportCode)
+                    }
+                  }}
                 >
                   <td className="p-3 font-medium">{cp.airportCode}</td>
                   <td className="p-3">{cp.name}</td>

@@ -78,10 +78,13 @@ export function ReportSheet({
             'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
           )
         )
+        if (focusables.length === 0) return
         const current = document.activeElement as HTMLElement | null
         const idx = focusables.indexOf(current ?? focusables[0])
-        const next = focusables[(idx + 1) % focusables.length]
-        next?.focus()
+        const nextIdx = e.shiftKey
+          ? (idx - 1 + focusables.length) % focusables.length
+          : (idx + 1) % focusables.length
+        focusables[nextIdx]?.focus()
       }
     }
     window.addEventListener('keydown', handler)
@@ -145,6 +148,7 @@ export function ReportSheet({
 
   return (
     <div
+      tabIndex={-1}
       role="dialog"
       aria-modal="true"
       aria-labelledby="report-sheet-title"
@@ -153,12 +157,12 @@ export function ReportSheet({
     >
       <button
         type="button"
+        tabIndex={-1}
         aria-label="Close report dialog"
         onClick={onClose}
         className="absolute inset-0 bg-slate-900/50"
       />
       <div
-        tabIndex={-1}
         className="relative w-full rounded-t-3xl bg-white p-5 shadow-2xl sm:max-w-md sm:rounded-3xl"
       >
         <div className="mx-auto mb-4 h-1.5 w-10 rounded-full bg-slate-200 sm:hidden" />
