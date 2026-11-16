@@ -282,7 +282,7 @@ export default function Home() {
                         </div>
                       </div>
                       <div className="flex items-center justify-between mt-3">
-                        <Link to={`/airport/${cp.airportCode.toLowerCase()}`} className="text-sm text-brandDark hover:underline">View airport →</Link>
+                        <Link to={`/airports/${cp.airportCode.toLowerCase()}`} className="text-sm text-brandDark hover:underline">View airport →</Link>
                         <button onClick={() => setReporting(cp.id)} className="text-sm bg-brand text-white px-3 py-1 rounded hover:bg-brandDark transition">Report time</button>
                       </div>
                     </div>

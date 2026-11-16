@@ -9,8 +9,17 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from "recharts";
+import { useEffect, useMemo, useState } from 'react'
 import { useApi } from "../hooks/useApi";
+import { useOfflineQueue } from '../hooks/useOfflineQueue'
 import { SkeletonCard, SkeletonHeading } from "../components/Skeleton";
+import EmptyState from '../components/states/EmptyState'
+import OfflineState from '../components/states/OfflineState'
+import NetworkErrorState from '../components/states/NetworkErrorState'
+import { ReportSheet } from '../components/ReportSheet'
+import { DEFAULT_AIRPORT } from '../data/airports'
+
+const STORAGE_KEY = 'flyby.selected-airport'
 
 interface CheckpointMetric {
   id: string;
@@ -46,7 +55,38 @@ function getAccuracyColor(accuracy: number) {
 }
 
 export default function Dashboard() {
+  const { isOnline, pendingCount } = useOfflineQueue()
   const { data, loading, error } = useApi<DashboardData>("/api/dashboard", []);
+  const [reportOpen, setReportOpen] = useState(false)
+  const [selectedAirport, setSelectedAirport] = useState<string | null>(
+    () => localStorage.getItem(STORAGE_KEY)
+  )
+  const [search, setSearch] = useState('')
+
+  useEffect(() => {
+    if (selectedAirport) localStorage.setItem(STORAGE_KEY, selectedAirport)
+  }, [selectedAirport])
+
+  const checkpoints = useMemo(() => data?.checkpoints ?? [], [data])
+  const filteredCheckpoints = useMemo(() => {
+    const s = search.trim().toLowerCase()
+    if (!s) return checkpoints
+    return checkpoints.filter(
+      (cp) =>
+        cp.airportCode.toLowerCase().includes(s) ||
+        cp.airportName.toLowerCase().includes(s) ||
+        cp.name.toLowerCase().includes(s),
+    )
+  }, [checkpoints, search])
+
+  if (!isOnline) {
+    return (
+      <OfflineState
+        onRetry={() => {}}
+        queuedCount={pendingCount}
+      />
+    )
+  }
 
   if (loading) return (
     <div className="space-y-8">
@@ -59,12 +99,22 @@ export default function Dashboard() {
     </div>
   );
 
-  if (error) return <div className="text-center py-8 text-red-600">Failed to load dashboard.</div>;
+  if (error) {
+    return (
+      <NetworkErrorState
+        onRetry={() => {}}
+        onReportAnyway={() => {
+          setSelectedAirport(DEFAULT_AIRPORT.code)
+          setReportOpen(true)
+        }}
+      />
+    )
+  }
   if (!data) return <div className="text-center py-8">No dashboard data available.</div>;
 
-  const { summary, accuracyHistory, checkpoints } = data;
+  const { summary, accuracyHistory, checkpoints: allCheckpoints } = data;
 
-  const checkpointBars = checkpoints
+  const checkpointBars = allCheckpoints
     .map((cp) => ({
       name: `${cp.airportCode} ${cp.code}`,
       accuracy: cp.accuracy,
@@ -72,9 +122,54 @@ export default function Dashboard() {
     }))
     .sort((a, b) => b.accuracy - a.accuracy);
 
+  const handleReport = () => {
+    setSelectedAirport(DEFAULT_AIRPORT.code)
+    setReportOpen(true)
+  }
+
   return (
-    <div className="space-y-8">
-      <h2 className="text-2xl font-bold">Accuracy Metrics Dashboard</h2>
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <div>
+          <h2 className="text-2xl font-bold">Accuracy Metrics Dashboard</h2>
+          <p className="mt-1 text-sm text-slate-500">
+            Accuracy and processing metrics across all tracked checkpoints.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={handleReport}
+          aria-label="Report a wait time"
+          className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-brand-600 text-white px-4 py-2 text-sm font-semibold min-h-[44px] hover:bg-brand-700 focus:outline-none focus:ring-2 focus:ring-brand-500/40 focus:ring-offset-2"
+        >
+          Report wait time
+        </button>
+      </div>
+
+      <div className="mt-4">
+        <label htmlFor="dashboard-search" className="sr-only">
+          Search checkpoints by airport or name
+        </label>
+        <input
+          id="dashboard-search"
+          type="search"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search checkpoints (e.g. JFK or Terminal)…"
+          className="w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm text-slate-900 shadow-sm placeholder:text-slate-500 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/40 min-h-[44px]"
+          data-testid="dashboard-search"
+        />
+      </div>
+
+      {filteredCheckpoints.length === 0 && (
+        <EmptyState
+          illustration="no-data"
+          headline="No checkpoints match"
+          subhead="Try a different search term."
+          primaryAction={{ label: 'Clear search', onClick: () => setSearch('') }}
+          onPrimary={() => setSearch('')}
+        />
+      )}
 
       {/* Summary cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -148,8 +243,8 @@ export default function Dashboard() {
               </tr>
             </thead>
             <tbody>
-              {checkpoints.map((cp) => (
-                <tr key={cp.id} className="border-t hover:bg-gray-50 transition">
+              {filteredCheckpoints.map((cp) => (
+                <tr key={cp.id} className="border-t hover:bg-gray-50 transition min-h-[44px]">
                   <td className="p-3 font-medium">{cp.airportCode}</td>
                   <td className="p-3">{cp.name}</td>
                   <td className="p-3 text-gray-500">{cp.terminal || "—"}</td>
@@ -166,6 +261,13 @@ export default function Dashboard() {
           </table>
         </div>
       </div>
+
+      <ReportSheet
+        open={reportOpen}
+        airportCode={selectedAirport ?? DEFAULT_AIRPORT.code}
+        onClose={() => setReportOpen(false)}
+        onReported={() => setReportOpen(false)}
+      />
     </div>
   );
 }

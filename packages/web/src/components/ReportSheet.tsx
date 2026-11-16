@@ -37,10 +37,13 @@ export function ReportSheet({
   const options = checkpointOptions(airportCode)
   const [pickedCheckpoint, setPickedCheckpoint] = useState<string>('')
   const [minutes, setMinutes] = useState<number>(15)
+  const [customMinutes, setCustomMinutes] = useState<string>('')
+  const [isCustom, setIsCustom] = useState(false)
   const [lane, setLane] = useState<LaneType>('standard')
   const [submitting, setSubmitting] = useState(false)
   const [submitted, setSubmitted] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [returnFocus, setReturnFocus] = useState<HTMLElement | null>(null)
 
   // The sheet stays mounted while open/close toggles, so a pick from a
   // previous airport must never leak into this one: fall back to the first
@@ -60,6 +63,21 @@ export function ReportSheet({
     const timer = window.setInterval(() => setNowTick(Date.now()), 1000)
     return () => window.clearInterval(timer)
   }, [rateLimitUntil])
+
+  // Focus management: restore focus to the element that opened the modal,
+  // and close on Escape.
+  useEffect(() => {
+    if (!open) return
+    setReturnFocus(document.activeElement as HTMLElement | null)
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', handler)
+    return () => {
+      window.removeEventListener('keydown', handler)
+      if (returnFocus) returnFocus.focus()
+    }
+  }, [open, onClose, returnFocus])
 
   const secondsLeft =
     rateLimitUntil === null ? 0 : Math.max(0, Math.ceil((rateLimitUntil - nowTick) / 1000))
@@ -178,10 +196,13 @@ export function ReportSheet({
                   <button
                     key={option}
                     type="button"
-                    onClick={() => setMinutes(option)}
-                    aria-pressed={minutes === option}
+                    onClick={() => {
+                      setMinutes(option)
+                      setIsCustom(false)
+                    }}
+                    aria-pressed={minutes === option && !isCustom}
                     className={`h-12 rounded-xl border text-sm font-semibold transition focus:outline-none focus:ring-2 focus:ring-brand-500/40 ${
-                      minutes === option
+                      minutes === option && !isCustom
                         ? 'border-brand-500 bg-brand-500 text-white'
                         : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
                     }`}
@@ -189,7 +210,34 @@ export function ReportSheet({
                     {option === 60 ? '60+' : option}
                   </button>
                 ))}
+                <button
+                  key="custom"
+                  type="button"
+                  onClick={() => setIsCustom(true)}
+                  aria-pressed={isCustom}
+                  className={`h-12 rounded-xl border text-sm font-semibold transition focus:outline-none focus:ring-2 focus:ring-brand-500/40 ${
+                    isCustom ? 'border-brand-500 bg-brand-500 text-white' : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
+                  }`}
+                >
+                  Custom
+                </button>
               </div>
+              {isCustom && (
+                <div className="mt-3">
+                  <input
+                    type="number"
+                    min="1"
+                    placeholder="Minutes"
+                    value={customMinutes}
+                    onChange={(e) => setCustomMinutes(e.target.value)}
+                    onBlur={() => {
+                      const v = parseInt(customMinutes, 10)
+                      if (!isNaN(v) && v > 0) setMinutes(v)
+                    }}
+                    className="h-12 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+                  />
+                </div>
+              )}
             </fieldset>
             <fieldset className="mt-4">
               <legend className="text-sm font-semibold text-slate-700">Which lane are you in?</legend>

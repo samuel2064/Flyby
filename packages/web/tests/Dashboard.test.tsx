@@ -262,7 +262,7 @@ describe("Dashboard page", () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByText("Failed to load dashboard.")).toBeDefined();
+      expect(screen.getByText("Something went wrong.")).toBeDefined();
     });
   });
 

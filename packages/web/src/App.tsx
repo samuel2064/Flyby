@@ -1,4 +1,4 @@
-import { Routes, Route, Link, useParams, useNavigate } from 'react-router-dom'
+import { Routes, Route, Link, useParams, useNavigate, Navigate } from 'react-router-dom'
 import { useState, useEffect } from 'react'
 import { useAuth } from './contexts/AuthContext'
 import { PublicDashboard } from './components/PublicDashboard'
@@ -68,6 +68,11 @@ function AirportDetailRoute() {
   )
 }
 
+function AirportRedirectRoute() {
+  const { code } = useParams<{ code: string }>()
+  return <Navigate to={`/airports/${code}`} replace />
+}
+
 function App() {
   const { user, logout } = useAuth()
   const navigate = useNavigate()
@@ -122,7 +127,7 @@ function App() {
               path="/"
               element={
                 <PublicDashboard
-                  onSelectAirport={(a) => navigate(`/airport/${a.airport}`)}
+                  onSelectAirport={(a) => navigate(`/airports/${a.airport}`)}
                 />
               }
             />
@@ -131,7 +136,8 @@ function App() {
             <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
             <Route path="/login" element={<Login />} />
             <Route path="/signup" element={<Signup />} />
-            <Route path="/airport/:code" element={<AirportDetailRoute />} />
+            <Route path="/airport/:code" element={<AirportRedirectRoute />} />
+            <Route path="/airports/:code" element={<AirportDetailRoute />} />
             <Route path="/checkpoint/:id" element={<Checkpoint />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
