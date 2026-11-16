@@ -77,7 +77,7 @@ export function ReportSheet({
           dialogRef.current.querySelectorAll<HTMLElement>(
             'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
           )
-        )
+        ).filter((el) => el.tabIndex !== -1)
         if (focusables.length === 0) return
         const current = document.activeElement as HTMLElement | null
         const idx = focusables.indexOf(current ?? focusables[0])

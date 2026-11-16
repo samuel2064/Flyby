@@ -201,17 +201,8 @@ export default function Dashboard() {
               {filteredCheckpoints.map((cp) => (
                 <tr
                   key={cp.id}
-                  role="button"
-                  tabIndex={0}
-                  aria-label={`Select ${cp.airportCode}, ${cp.name}, ${cp.latestWaitTimeMinutes !== null ? cp.latestWaitTimeMinutes + ' minute wait' : 'no wait reported'}`}
-                  className="border-t hover:bg-gray-50 transition min-h-[44px] cursor-pointer focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+                  className={`border-t hover:bg-gray-50 transition cursor-pointer ${cp.airportCode === selectedAirport ? 'bg-brand-50' : ''}`}
                   onClick={() => setSelectedAirport(cp.airportCode)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault()
-                      setSelectedAirport(cp.airportCode)
-                    }
-                  }}
                 >
                   <td className="p-3 font-medium">{cp.airportCode}</td>
                   <td className="p-3">{cp.name}</td>
@@ -223,6 +214,19 @@ export default function Dashboard() {
                     {cp.latestReportedAt ? minutesAgo(cp.latestReportedAt) : "—"}
                   </td>
                   <td className="p-3 text-right text-gray-500">{cp.totalReports}</td>
+                  <td className="p-3 text-right">
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setSelectedAirport(cp.airportCode)
+                        setReportOpen(true)
+                      }}
+                      className="h-10 px-3 rounded-xl border border-slate-300 bg-white text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-brand-500/40 hover:bg-slate-50"
+                    >
+                      Report
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>
