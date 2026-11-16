@@ -13,11 +13,26 @@ app.set('trust proxy', true);
 // Middleware to parse JSON
 app.use(express.json());
 
-// Permissive CORS for the E2E test environment
+const DEFAULT_CORS_ORIGINS = ['https://flyby-web.onrender.com'];
+const CORS_ORIGINS = new Set(
+  (process.env.CORS_ORIGINS || DEFAULT_CORS_ORIGINS.join(','))
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean),
+);
+
 app.use((req, res, next) => {
-  res.set('Access-Control-Allow-Origin', '*');
-  res.set('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
-  res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Admin-Key');
+  const origin = req.headers.origin;
+  res.set('Vary', 'Origin');
+  if (origin) {
+    if (!CORS_ORIGINS.has(origin)) {
+      if (req.method === 'OPTIONS') return res.status(403).json({ error: 'Origin not allowed' });
+      return next();
+    }
+    res.set('Access-Control-Allow-Origin', origin);
+    res.set('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
+    res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Admin-Key, X-Subscription-Auth, X-User-Id');
+  }
   if (req.method === 'OPTIONS') return res.sendStatus(204);
   next();
 });
@@ -67,9 +82,6 @@ try {
 
 const subscriptions = new Map();
 let subSeq = 1;
-const VAPID_PUBLIC_KEY =
-  process.env.VAPID_PUBLIC_KEY ||
-  'BMqC9TckHTr2DdYFqviDHxDoQZFKQz0zTbvk1KwUqJvXcbYQzPxmZbQ0c9kYvA1p1w0fKk1w2yQ0pXy9m5Qq0R8';
 
 // --- SSE live updates -------------------------------------------------------
 // TIR-314: the stream carries only REAL wait-time updates. When a report is
@@ -93,7 +105,6 @@ function sseHandler(req, res) {
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-cache',
     Connection: 'keep-alive',
-    'Access-Control-Allow-Origin': '*',
   });
   res.write('retry: 3000\n\n');
   sseWrite(res, { type: 'connected', timestamp: new Date().toISOString() });
@@ -607,7 +618,13 @@ app.post('/api/moderation/reports/:id/clear', async (req, res) => {
 // --- VAPID / push notifications --------------------------------------------
 
 // VAPID public key (multiple alias paths for client compatibility)
-const vapidHandler = (req, res) => res.json({ publicKey: VAPID_PUBLIC_KEY });
+const vapidHandler = (req, res) => {
+  const publicKey = process.env.VAPID_PUBLIC_KEY;
+  if (!publicKey) {
+    return res.status(503).json({ error: 'Push notifications not configured: VAPID_PUBLIC_KEY is not set' });
+  }
+  return res.json({ publicKey });
+};
 app.get('/api/notifications/vapid-public-key', vapidHandler);
 app.get('/api/push/vapid-public-key', vapidHandler);
 app.get('/api/push/vapidPublicKey', vapidHandler);

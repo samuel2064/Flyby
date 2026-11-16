@@ -35,6 +35,33 @@ async function openSearchTab(page) {
   await tab.click()
 }
 
+async function verifyPwaAssets(page) {
+  const manifestResponse = await page.request.get(`${BASE}/manifest.webmanifest`)
+  if (!manifestResponse.ok()) fail(`manifest.webmanifest returned HTTP ${manifestResponse.status()}`)
+  const manifest = await manifestResponse.json()
+  const icons = Array.isArray(manifest.icons) ? manifest.icons : []
+  const requiredIcons = [
+    { sizes: '192x192', purpose: 'any' },
+    { sizes: '512x512', purpose: 'any' },
+    { sizes: '512x512', purpose: 'maskable' },
+  ]
+  for (const required of requiredIcons) {
+    if (!icons.some((icon) => icon.sizes === required.sizes && icon.purpose === required.purpose)) {
+      fail(`manifest is missing a ${required.sizes} ${required.purpose} icon`)
+    }
+  }
+  for (const icon of icons.filter((entry) => entry.type === 'image/png')) {
+    const response = await page.request.get(new URL(icon.src, BASE).href)
+    if (!response.ok()) fail(`manifest PNG icon ${icon.src} returned HTTP ${response.status()}`)
+    if (!(response.headers()['content-type'] || '').startsWith('image/png')) {
+      fail(`manifest PNG icon ${icon.src} has an invalid content type`)
+    }
+  }
+  const appleTouch = await page.request.get(`${BASE}/apple-touch-icon.png`)
+  if (!appleTouch.ok()) fail(`apple-touch-icon.png returned HTTP ${appleTouch.status()}`)
+  console.log('  PWA icons: 192px, 512px, maskable, and apple-touch are deployed')
+}
+
 async function attempt(n) {
   const browser = await chromium.launch()
   const errors = []
@@ -52,6 +79,7 @@ async function attempt(n) {
     // TIR-379 acceptance: prove the Dashboard actually mounted (not just that
     // the nav button exists) before navigating away from it.
     await page.waitForSelector('#dashboard-filter', { state: 'visible', timeout: 60_000 })
+    await verifyPwaAssets(page)
     await openSearchTab(page)
     await page.waitForSelector('#airport-search', { state: 'visible', timeout: 60_000 })
 
@@ -134,7 +162,17 @@ async function attempt(n) {
     // the real airport-WiFi assertion; the search UI follows once it is up.
     await openSearchTab(page)
     await page.waitForSelector('#airport-search', { timeout: 30_000 })
-    console.log('  offline: shell cached by the SW, mounted with the network down')
+    await page.getByText('Could not load wait times for SEA.', { exact: false }).waitFor({
+      state: 'visible',
+      timeout: 30_000,
+    })
+    if ((await page.getByText('Live', { exact: true }).count()) > 0) {
+      fail('offline data was represented as live')
+    }
+    if ((await page.locator('article').count()) > 0) {
+      fail('offline data rendered checkpoint cards without a live response')
+    }
+    console.log('  offline: shell cached by the SW, mounted with the network down and no stale live data')
     await page.context().setOffline(false)
 
     // Mobile viewport (TIR-379 acceptance): at 375px the app must still land
@@ -145,6 +183,12 @@ async function attempt(n) {
       await mobile.waitForSelector('#dashboard-filter', { state: 'visible', timeout: 60_000 })
       await openSearchTab(mobile)
       await mobile.waitForSelector('#airport-search', { state: 'visible', timeout: 60_000 })
+      const horizontalOverflow = await mobile.evaluate(
+        () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      )
+      if (horizontalOverflow > 1) {
+        fail(`mobile viewport overflows horizontally by ${horizontalOverflow}px`)
+      }
       console.log('  mobile 375px: dashboard lands, Search & Report reachable, search UI mounts')
     } finally {
       await mobile.close()

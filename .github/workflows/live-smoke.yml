@@ -46,6 +46,21 @@ jobs:
           }
 
           probe "/api/health" '"status":"ok"'
+
+          code=$(curl -s -D /tmp/cors_allowed_headers -o /dev/null -w '%{http_code}' --max-time 90 -H 'Origin: https://flyby-web.onrender.com' "$BASE_URL/api/airports" || echo 000)
+          if [ "$code" != "200" ] || ! grep -qi '^access-control-allow-origin: https://flyby-web.onrender.com' /tmp/cors_allowed_headers; then
+            fail "Production web origin did not receive an exact CORS allow header"
+          fi
+          code=$(curl -s -D /tmp/cors_disallowed_headers -o /dev/null -w '%{http_code}' --max-time 90 -H 'Origin: https://attacker.example' "$BASE_URL/api/airports" || echo 000)
+          if [ "$code" != "200" ] || grep -qi '^access-control-allow-origin:' /tmp/cors_disallowed_headers; then
+            fail "Unconfigured origin received a CORS allow header"
+          fi
+          code=$(curl -s -o /tmp/cors_preflight.json -w '%{http_code}' --max-time 90 -X OPTIONS -H 'Origin: https://attacker.example' -H 'Access-Control-Request-Method: POST' "$BASE_URL/api/wait-times" || echo 000)
+          if [ "$code" != "403" ]; then
+            fail "Unconfigured-origin preflight returned HTTP $code (expected 403)"
+          fi
+          echo "OK    CORS restricted to the production web origin"
+
           probe "/api/airports" '"airports"'
           probe "/api/airports/JFK" '"code":"JFK"'
           probe "/api/checkpoints?airport=JFK" '"checkpoints"'
