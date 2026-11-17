@@ -3,6 +3,7 @@ import { getAirportWaitStats } from '../api/summary'
 import type { AirportStats, AirportSummary, StatsBucket } from '../api/summary'
 import { formatAge, formatAverage, isStale } from '../lib/dashboard'
 import { useRefreshInterval } from '../hooks/useRefreshInterval'
+import { useReportSheet } from '../contexts/ReportSheetContext'
 
 interface AirportDetailProps {
   // Airport code (from the URL param). When arriving via the dashboard drill,
@@ -16,6 +17,7 @@ interface AirportDetailProps {
 // day-of-week CSS bar charts. Bars are divs, not a chart lib; color is never
 // the sole signal (values are printed next to every bar).
 export function AirportDetail({ code, summary, onBack }: AirportDetailProps) {
+  const { openReportSheet } = useReportSheet()
   const [stats, setStats] = useState<AirportStats | null>(null)
   const [error, setError] = useState(false)
 
@@ -49,6 +51,13 @@ export function AirportDetail({ code, summary, onBack }: AirportDetailProps) {
         className="inline-flex min-h-11 items-center gap-1 text-sm font-semibold text-brand-700 hover:underline focus:outline-none focus:ring-2 focus:ring-brand-500/40"
       >
         ← All airports
+      </button>
+      <button
+        type="button"
+        onClick={() => openReportSheet(code)}
+        className="inline-flex min-h-11 items-center gap-1 text-sm font-semibold text-brand-700 hover:underline focus:outline-none focus:ring-2 focus:ring-brand-500/40 ml-2"
+      >
+        Report wait time
       </button>
 
       {error && (

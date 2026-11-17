@@ -15,7 +15,7 @@ interface ReportSheetProps {
   onReported: () => void
 }
 
-const WAIT_OPTIONS: number[] = [5, 10, 15, 20, 30, 45, 60]
+const WAIT_OPTIONS: number[] = [5, 10, 15, 20, 30, 45, 60, 90, 120]
 
 const LANE_BUTTON_LABELS: Record<LaneType, string> = {
   standard: 'Standard',
@@ -23,7 +23,7 @@ const LANE_BUTTON_LABELS: Record<LaneType, string> = {
   clear: 'CLEAR',
 }
 
-const CUSTOM_MAX_MINUTES = 180
+const CUSTOM_MAX_MINUTES = 120
 
 export function ReportSheet({
   open,
@@ -44,6 +44,7 @@ export function ReportSheet({
   const [error, setError] = useState<string | null>(null)
   const [returnFocus, setReturnFocus] = useState<HTMLElement | null>(null)
   const dialogRef = useRef<HTMLDivElement | null>(null)
+  const prevOpen = useRef<boolean>(open)
 
   const effectivePick = effectiveCheckpointPick(pickedCheckpoint, options)
   const activeCheckpoint = checkpoint ?? effectivePick
@@ -97,6 +98,20 @@ export function ReportSheet({
   useEffect(() => {
     if (!open || !dialogRef.current) return
     dialogRef.current.focus()
+  }, [open])
+
+  // Reset form state whenever the sheet is opened so a prior report does not leak in.
+  useEffect(() => {
+    const wasOpen = prevOpen.current
+    prevOpen.current = open
+    if (!open || wasOpen) return
+    setMinutes(15)
+    setCustomMinutes('')
+    setIsCustom(false)
+    setLane('standard')
+    setSubmitted(false)
+    setError(null)
+    setCustomError(null)
   }, [open])
 
   const handleCustomChange = useCallback((value: string) => {

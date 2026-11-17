@@ -98,11 +98,37 @@ describe('ReportSheet (checkpoint picker / first-report flow)', () => {
     fireEvent.click(screen.getByRole('radio', { name: /Custom/i }))
     const input = screen.getByLabelText(/Custom wait time in minutes/i)
     fireEvent.change(input, { target: { value: '999' } })
-    expect(screen.getByText(/Enter 1–180 minutes/)).toBeInTheDocument()
+    expect(screen.getByText(/Enter 1–120 minutes/)).toBeInTheDocument()
   })
 
   it('announces lane options as a radiogroup', () => {
     render(<ReportSheet open={true} airportCode="JFK" onClose={() => {}} onReported={() => {}} />)
     expect(screen.getByRole('radiogroup', { name: /Security lane/i })).toBeInTheDocument()
+  })
+
+  it('renders presets up to 120 minutes', () => {
+    render(<ReportSheet open={true} airportCode="JFK" onClose={() => {}} onReported={() => {}} />)
+    expect(screen.getByRole('radio', { name: /^90$/ })).toBeInTheDocument()
+    expect(screen.getByRole('radio', { name: /^120$/ })).toBeInTheDocument()
+  })
+
+  it('resets form state when reopened after a prior report', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      headers: new Headers(),
+      json: () => Promise.resolve({ id: 'rep-1', airport: 'JFK', checkpoint: 'Main', waitMinutes: 15, receivedAt: '2026-09-23T12:00:00Z' }),
+    } as Response)
+
+    const { rerender } = render(<ReportSheet open={true} airportCode="JFK" onClose={() => {}} onReported={() => {}} />)
+
+    // Select a non-default preset
+    fireEvent.click(screen.getByRole('radio', { name: /^120$/ }))
+
+    // Toggle closed then open via prop; form should reset to default preset 15.
+    rerender(<ReportSheet open={false} airportCode="JFK" onClose={() => {}} onReported={() => {}} />)
+    rerender(<ReportSheet open={true} airportCode="JFK" onClose={() => {}} onReported={() => {}} />)
+
+    expect(screen.getByRole('radio', { name: /^15$/ })).toHaveAttribute('aria-checked', 'true')
   })
 })

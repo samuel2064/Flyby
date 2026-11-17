@@ -16,7 +16,7 @@ import { SkeletonCard, SkeletonHeading } from "../components/Skeleton";
 import EmptyState from '../components/states/EmptyState'
 import OfflineState from '../components/states/OfflineState'
 import NetworkErrorState from '../components/states/NetworkErrorState'
-import { ReportSheet } from '../components/ReportSheet'
+import { useReportSheet } from '../contexts/ReportSheetContext'
 import { DEFAULT_AIRPORT } from '../data/airports'
 
 const STORAGE_KEY = 'flyby.selected-airport'
@@ -68,7 +68,7 @@ function minutesAgo(iso: string | null): string | null {
 export default function Dashboard() {
   const { isOnline, pendingCount } = useOfflineQueue()
   const { data, loading, error, refetch } = useApi<DashboardData>("/api/dashboard", []);
-  const [reportOpen, setReportOpen] = useState(false)
+  const { openReportSheet, setReportedHandler } = useReportSheet()
   const [selectedAirport, setSelectedAirport] = useState<string | null>(
     () => localStorage.getItem(STORAGE_KEY)
   )
@@ -77,6 +77,11 @@ export default function Dashboard() {
   useEffect(() => {
     if (selectedAirport) localStorage.setItem(STORAGE_KEY, selectedAirport)
   }, [selectedAirport])
+
+  // Refresh dashboard data after a cross-view report is submitted.
+  useEffect(() => {
+    setReportedHandler(refetch)
+  }, [refetch, setReportedHandler])
 
   const checkpoints = useMemo(() => data?.checkpoints ?? [], [data])
   const filteredCheckpoints = useMemo(() => {
@@ -115,8 +120,7 @@ export default function Dashboard() {
       <NetworkErrorState
         onRetry={refetch}
         onReportAnyway={() => {
-          setSelectedAirport(selectedAirport ?? DEFAULT_AIRPORT.code)
-          setReportOpen(true)
+          openReportSheet(selectedAirport ?? DEFAULT_AIRPORT.code)
         }}
       />
     )
@@ -134,8 +138,7 @@ export default function Dashboard() {
     .sort((a, b) => b.accuracy - a.accuracy);
 
   const handleReport = () => {
-    setSelectedAirport(selectedAirport ?? DEFAULT_AIRPORT.code)
-    setReportOpen(true)
+    openReportSheet(selectedAirport ?? DEFAULT_AIRPORT.code)
   }
 
   return (
@@ -222,8 +225,7 @@ export default function Dashboard() {
                       type="button"
                       onClick={(e) => {
                         e.stopPropagation()
-                        setSelectedAirport(cp.airportCode)
-                        setReportOpen(true)
+                        openReportSheet(cp.airportCode)
                       }}
                       className="h-11 px-3 rounded-xl border border-slate-300 bg-white text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-brand-500/40 hover:bg-slate-50"
                     >
@@ -293,12 +295,6 @@ export default function Dashboard() {
         </ResponsiveContainer>
       </div>
 
-      <ReportSheet
-        open={reportOpen}
-        airportCode={selectedAirport ?? DEFAULT_AIRPORT.code}
-        onClose={() => setReportOpen(false)}
-        onReported={refetch}
-      />
     </div>
   );
 }

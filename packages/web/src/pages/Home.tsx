@@ -8,7 +8,7 @@ import { useRefreshInterval } from '../hooks/useRefreshInterval';
 import { SkeletonCard } from '../components/Skeleton';
 import ReportModal from '../components/ReportModal';
 import { laneLabel, laneBadgeClass } from '../lib/lane';
-import { ReportSheet } from '../components/ReportSheet';
+import { useReportSheet } from '../contexts/ReportSheetContext';
 import { DEFAULT_AIRPORT } from '../data/airports';
 
 interface Checkpoint {
@@ -74,7 +74,7 @@ function groupByAirport(checkpoints: Checkpoint[]): AirportGroup[] {
 
 export default function Home() {
   const [reporting, setReporting] = useState<string | null>(null);
-  const [reportPickerOpen, setReportPickerOpen] = useState(false);
+  const { openReportSheet } = useReportSheet();
   const [search, setSearch] = useState('');
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const { isOnline, pendingCount, syncQueue } = useOfflineQueue();
@@ -172,7 +172,7 @@ export default function Home() {
         <div>
           <h2 className="text-2xl font-bold">Live Wait Times</h2>
           <button
-            onClick={() => setReportPickerOpen(true)}
+            onClick={() => openReportSheet(DEFAULT_AIRPORT.code)}
             className="mt-2 text-sm bg-brand text-white px-3 py-1 rounded hover:bg-brandDark transition"
           >
             Report a wait time
@@ -298,14 +298,6 @@ export default function Home() {
           checkpointId={reporting}
           checkpointName={checkpoints.find((c) => c.id === reporting)?.name || ''}
           onClose={() => setReporting(null)}
-          onReported={fetchData}
-        />
-      )}
-      {reportPickerOpen && (
-        <ReportSheet
-          open={reportPickerOpen}
-          airportCode={DEFAULT_AIRPORT.code}
-          onClose={() => setReportPickerOpen(false)}
           onReported={fetchData}
         />
       )}

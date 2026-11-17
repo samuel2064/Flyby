@@ -13,6 +13,7 @@ import Profile from './pages/Profile'
 import ProtectedRoute from './components/ProtectedRoute'
 import ErrorBoundary from './components/ErrorBoundary'
 import { OnboardingFlow } from './onboarding/OnboardingFlow'
+import { ReportSheetProvider } from './contexts/ReportSheetContext'
 
 interface BeforeInstallPromptEvent extends Event {
   prompt(): Promise<void>;
@@ -96,7 +97,8 @@ function App() {
 
   return (
     <div className="min-h-screen bg-gray-50 text-gray-900">
-      <header className="bg-brand text-white p-4 shadow-md">
+      <ReportSheetProvider>
+        <header className="bg-brand text-white p-4 shadow-md">
         <div className="max-w-3xl mx-auto flex items-center justify-between">
           <Link to="/" className="text-xl font-bold tracking-tight">
             Flyby
@@ -149,6 +151,7 @@ function App() {
       >
         Flyby — crowdsourced airport security wait times
       </footer>
+      </ReportSheetProvider>
     </div>
   )
 }
