@@ -36,12 +36,20 @@ How a change reaches production:
 1. A pull request merges into `main` after the CI checks pass.
 2. The nightlamp ops repo (`samuel2064/nightlamp`,
    `.github/workflows/deploy-flyby.yml`) polls this repo's `main` commit every
-   10 minutes, checks that the latest CI run for that exact commit succeeded,
+   5 minutes, checks that the latest CI run for that exact commit succeeded,
    then triggers the Render deploys for the two service ids above, waits for
    `live`, and verifies the eight production endpoints.
 3. `.github/workflows/render-deploy.yml` in this repo holds no credential, so it
    only verifies production. If per-service Render deploy hooks are ever added
    (they are dashboard-only in Render), it deploys through those hooks instead.
+
+Known limitation: both this poll and the keep-alive schedule
+(`.github/workflows/keepalive.yml`) run on GitHub's scheduler, which drops most
+cron ticks on this account (2 scheduled runs in the 10 hours after
+2026-11-17T02:30Z, with no skipped runs and no Actions minutes overage). A
+merge can therefore take longer than the nominal 5 minutes to reach production;
+the DevOps agent also dispatches the ops workflow after merges, and re-authorizing
+the Render GitHub App for this repo would remove the dependency entirely.
 
 Render's own auto-deploy is configured (`autoDeployTrigger: commit` in
 `render.yaml`, applied to both services) but does not fire for this repo: the
