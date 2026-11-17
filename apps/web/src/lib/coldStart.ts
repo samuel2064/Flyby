@@ -1,14 +1,11 @@
 import { ApiError, NetworkError } from '../api/client'
+import { isOffline } from './connectivity'
+
+export { isOffline }
 
 // 3 attempts over ~45s: attempt 1 at t=0, retry after 15s, retry after 30s.
 const MAX_ATTEMPTS = 3
 const RETRY_DELAYS_MS = [15_000, 30_000]
-
-// Is the device itself offline? If so, never treat a failure as a cold start -
-// keep the existing offline/stale-card behaviour instead.
-export function isOffline(): boolean {
-  return typeof navigator !== 'undefined' && !navigator.onLine
-}
 
 // Wraps an async API call with retry-with-backoff for network-level failures
 // (fetch rejected / timeout / abort), which are the signal that the Render API
