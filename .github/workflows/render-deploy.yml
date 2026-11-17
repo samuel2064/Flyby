@@ -44,11 +44,14 @@ jobs:
       - name: Validate configuration
         run: |
           set -euo pipefail
-          test -n "$WEB_HOOK_URL" || test -n "$RENDER_API_KEY" || { echo "::error::no deploy credential: set RENDER_WEB_DEPLOY_HOOK_URL or RENDER_API_KEY"; exit 1; }
-          [[ "$WEB_SERVICE_ID" =~ ^srv-[a-z0-9]+$ ]] || { echo "::error::RENDER_WEB_SERVICE_ID is missing or malformed"; exit 1; }
-          [[ "$API_SERVICE_ID" =~ ^srv-[a-z0-9]+$ ]] || { echo "::error::RENDER_API_SERVICE_ID is missing or malformed"; exit 1; }
-          if [ -n "$WEB_HOOK_URL" ]; then echo "web deploy credential: service deploy hook"; else echo "web deploy credential: workspace API key"; fi
-          if [ -n "$API_HOOK_URL" ]; then echo "api deploy credential: service deploy hook"; else echo "api deploy credential: workspace API key"; fi
+          [[ "$WEB_SERVICE_ID" == "srv-dapocsugekts73ek60t0" ]] || { echo "::error::RENDER_WEB_SERVICE_ID must be the Flyby web service id"; exit 1; }
+          [[ "$API_SERVICE_ID" == "srv-dak58lm1egvs73957l50" ]] || { echo "::error::RENDER_API_SERVICE_ID must be the Flyby api service id"; exit 1; }
+          if [ -z "$WEB_HOOK_URL" ] && [ -z "$API_HOOK_URL" ] && [ -z "$RENDER_API_KEY" ]; then
+            echo "::notice::no Render deploy credential configured; Render auto-deploys both services on push to main"
+          else
+            if [ -n "$WEB_HOOK_URL" ]; then echo "web deploy credential: service deploy hook"; elif [ -n "$RENDER_API_KEY" ]; then echo "web deploy credential: workspace API key"; else echo "web deploy credential: none (Render auto-deploy)"; fi
+            if [ -n "$API_HOOK_URL" ]; then echo "api deploy credential: service deploy hook"; elif [ -n "$RENDER_API_KEY" ]; then echo "api deploy credential: workspace API key"; else echo "api deploy credential: none (Render auto-deploy)"; fi
+          fi
 
       - name: Trigger Render deploys
         run: |
@@ -58,13 +61,16 @@ jobs:
             if [ -n "$hook" ]; then
               code=$(curl -sS -o "/tmp/deploy-$label.json" -w '%{http_code}' -X POST "$hook")
               echo "$label deploy via service deploy hook -> HTTP $code"
-            else
+            elif [ -n "$RENDER_API_KEY" ]; then
               code=$(curl -sS -o "/tmp/deploy-$label.json" -w '%{http_code}' -X POST \
                 -H "Authorization: Bearer $RENDER_API_KEY" \
                 -H 'Content-Type: application/json' \
                 -d '{}' \
                 "https://api.render.com/v1/services/$sid/deploys")
               echo "$label deploy via workspace API key -> HTTP $code"
+            else
+              echo "$label: no deploy credential configured; Render auto-deploys this service on push to main"
+              return 0
             fi
             jq -c '{deploy: .deploy.id, commit: .commit.id, status}' "/tmp/deploy-$label.json" 2>/dev/null || cat "/tmp/deploy-$label.json"
             case "$code" in
