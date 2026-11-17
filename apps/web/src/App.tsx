@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { DEFAULT_AIRPORT, checkpointOptions, type Airport } from './data/airports'
 import { API_BASE_URL } from './api/client'
 import { useWaitTimes, formatRelativeTime } from './hooks/useWaitTimes'
+import { useOnlineStatus } from './hooks/useOnlineStatus'
 import { useForecasts } from './hooks/useForecasts'
 import { buildBestByCheckpoint } from './lib/forecastChip'
 import { buildConsensusByCheckpoint } from './lib/crowdConsensus'
@@ -89,6 +90,7 @@ function SearchReportView() {
   // string = fixed checkpoint from a card.
   const [reportTarget, setReportTarget] = useState<string | null | undefined>(undefined)
   const { waitTimes, state, waking, lastUpdated, live, refresh } = useWaitTimes(airport.code)
+  const online = useOnlineStatus()
   const { forecasts, loading: forecastsLoading } = useForecasts(airport.code, lastUpdated)
   const bestByCheckpoint = useMemo(
     () => buildBestByCheckpoint(forecasts),
@@ -160,16 +162,35 @@ function SearchReportView() {
                 <SkeletonCard />
               </>
             )}
-            {waking && (
+            {waking && online && (
               <p className="text-xs text-slate-500">Waking up the service…</p>
+            )}
+            {state === 'offline' && (
+              <div className="rounded-2xl border border-slate-200 bg-white p-6 text-center shadow-sm">
+                <p className="text-sm font-semibold text-slate-900">You are offline.</p>
+                <p className="mt-1 text-xs text-slate-500">
+                  Wait for a connection, then try again.
+                </p>
+                <button
+                  type="button"
+                  onClick={refresh}
+                  className="mt-4 inline-flex h-10 items-center justify-center rounded-xl border border-brand-500 bg-white px-4 text-sm font-semibold text-brand-700 transition hover:bg-brand-50 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+                >
+                  Try again
+                </button>
+              </div>
             )}
             {state === 'error' && (
               <div className="rounded-2xl border border-slate-200 bg-white p-6 text-center shadow-sm">
                 <p className="text-sm font-semibold text-slate-900">
-                  Could not load wait times for {airport.code}.
+                  {online
+                    ? `Could not load wait times for ${airport.code}.`
+                    : 'You are offline.'}
                 </p>
                 <p className="mt-1 text-xs text-slate-500">
-                  The API may be waking up. Try again in a moment.
+                  {online
+                    ? 'The API may be waking up. Try again in a moment.'
+                    : 'Wait for a connection, then try again.'}
                 </p>
                 <button
                   type="button"

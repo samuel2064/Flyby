@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { getWaitTimes, POLL_FALLBACK_MS, subscribeToLiveUpdates } from '../api/waitTimes'
 import { fetchWithColdStartRetry } from '../lib/coldStart'
+import { isOffline, phaseAfterNetworkFailure } from '../lib/connectivity'
 import { latestPerCheckpoint } from '../lib/latestPerCheckpoint'
 import type { WaitTime, WaitTimeUpdateEvent } from '../api/types'
 
-type FetchState = 'idle' | 'loading' | 'waking' | 'ready' | 'error'
+type FetchState = 'idle' | 'loading' | 'waking' | 'offline' | 'ready' | 'error'
 
 export interface UseWaitTimesResult {
   waitTimes: WaitTime[]
@@ -45,8 +46,15 @@ export function useWaitTimes(airportCode: string): UseWaitTimesResult {
 
   // Initial load + manual refresh: retry with backoff on network-level
   // failures (cold start), showing a "waking up" state instead of an error.
+  // A device without a connection is never a cold start: it gets its own
+  // offline state and no request is sent at all.
   useEffect(() => {
     let cancelled = false
+    if (isOffline()) {
+      setState('offline')
+      setWaking(false)
+      return
+    }
     setState('loading')
     setWaking(true)
 
@@ -59,7 +67,7 @@ export function useWaitTimes(airportCode: string): UseWaitTimesResult {
       })
       .catch(() => {
         if (cancelled) return
-        setState('error')
+        setState(phaseAfterNetworkFailure(!isOffline()))
       })
       .finally(() => {
         if (!cancelled) setWaking(false)
@@ -69,6 +77,16 @@ export function useWaitTimes(airportCode: string): UseWaitTimesResult {
       cancelled = true
     }
   }, [airportCode, refreshTick])
+
+  // Coming back online is the moment to retry: the data may have been
+  // unavailable only because the device had no connection.
+  useEffect(() => {
+    const reconnect = () => {
+      if (!isOffline()) refresh()
+    }
+    window.addEventListener('online', reconnect)
+    return () => window.removeEventListener('online', reconnect)
+  }, [refresh])
 
   useEffect(() => {
     const subscription = subscribeToLiveUpdates(

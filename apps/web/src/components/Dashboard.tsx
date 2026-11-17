@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { getWaitTimesSummary } from '../api/summary'
 import { fetchWithColdStartRetry } from '../lib/coldStart'
+import { phaseAfterNetworkFailure } from '../lib/connectivity'
+import { useOnlineStatus } from '../hooks/useOnlineStatus'
 import type { AirportSummary } from '../api/summary'
 import {
   filterAirports,
@@ -15,7 +17,7 @@ import {
 
 const AUTO_REFRESH_MS = 60_000
 
-type FetchState = 'loading' | 'waking' | 'ready' | 'error'
+type FetchState = 'loading' | 'waking' | 'offline' | 'ready' | 'error'
 
 interface DashboardProps {
   // Passes the whole summary row: the drill needs latestReportedAt for its
@@ -30,19 +32,25 @@ export function Dashboard({ onSelectAirport }: DashboardProps) {
   const [airports, setAirports] = useState<AirportSummary[]>([])
   const [state, setState] = useState<FetchState>('loading')
   const [query, setQuery] = useState('')
+  const online = useOnlineStatus()
 
   // Initial load: retry with backoff on network-level failures (cold start),
-  // showing a "waking up" state instead of an error.
+  // showing a "waking up" state instead of an error. A device without a
+  // connection is never a cold start: it gets its own offline state.
   const loadWithRetry = useCallback(async () => {
+    if (!online) {
+      setState('offline')
+      return
+    }
     setState('waking')
     try {
       const data = await fetchWithColdStartRetry(() => getWaitTimesSummary())
       setAirports(data.airports)
       setState('ready')
     } catch {
-      setState('error')
+      setState(phaseAfterNetworkFailure(online))
     }
-  }, [])
+  }, [online])
 
   // Background auto-refresh: try once, silent on failure - keep old data
   // visible rather than disrupting the view with a transient cold start.
@@ -90,9 +98,11 @@ export function Dashboard({ onSelectAirport }: DashboardProps) {
             ? `Updated ${formatAge(newest)} · refreshes every 60s`
             : state === 'waking'
               ? 'Waking up the service…'
-              : state === 'loading'
-                ? 'Loading…'
-                : ''}
+              : state === 'offline'
+                ? 'You are offline'
+                : state === 'loading'
+                  ? 'Loading…'
+                  : ''}
         </p>
       </div>
 
@@ -110,18 +120,37 @@ export function Dashboard({ onSelectAirport }: DashboardProps) {
         />
       </div>
 
-      {(state === 'loading' || state === 'waking') && (
+      {(state === 'loading' || state === 'waking' || state === 'offline') && (
         <p className="mt-6 text-sm text-slate-500">
-          {state === 'waking' ? 'Waking up the service…' : 'Loading airport wait times…'}
+          {state === 'waking'
+            ? 'Waking up the service…'
+            : state === 'offline'
+              ? 'You are offline. Wait for a connection, then try again.'
+              : 'Loading airport wait times…'}
         </p>
+      )}
+      {state === 'offline' && (
+        <button
+          type="button"
+          onClick={() => void loadWithRetry()}
+          className="mt-4 inline-flex h-10 items-center justify-center rounded-xl border border-brand-500 bg-white px-4 text-sm font-semibold text-brand-700 transition hover:bg-brand-50 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+        >
+          Try again
+        </button>
       )}
       {state === 'error' && (
         <div className="mt-6 rounded-2xl border border-slate-200 bg-white p-6 text-center shadow-sm">
-          <p className="text-sm font-semibold text-slate-900">Could not load the dashboard.</p>
-          <p className="mt-1 text-xs text-slate-500">The API may be waking up. Try again in a moment.</p>
+          <p className="text-sm font-semibold text-slate-900">
+            {online ? 'Could not load the dashboard.' : 'You are offline.'}
+          </p>
+          <p className="mt-1 text-xs text-slate-500">
+            {online
+              ? 'The API may be waking up. Try again in a moment.'
+              : 'Wait for a connection, then try again.'}
+          </p>
           <button
             type="button"
-            onClick={() => void load()}
+            onClick={() => void loadWithRetry()}
             className="mt-4 inline-flex h-10 items-center justify-center rounded-xl border border-brand-500 bg-white px-4 text-sm font-semibold text-brand-700 transition hover:bg-brand-50 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
           >
             Retry
