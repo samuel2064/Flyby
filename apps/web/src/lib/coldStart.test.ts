@@ -2,15 +2,26 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { fetchWithColdStartRetry, isOffline } from './coldStart'
 import { ApiError, NetworkError } from '../api/client'
 
-const originalOnLine = Object.getOwnPropertyDescriptor(navigator, 'onLine')
+// Node < 21 has no global `navigator`, so never touch it directly: the
+// browser build always has one, CI may not.
+const globalRef = globalThis as unknown as { navigator?: { onLine: boolean } }
+const hadNavigator = Boolean(globalRef.navigator)
+const originalOnLine = globalRef.navigator
+  ? Object.getOwnPropertyDescriptor(globalRef.navigator, 'onLine')
+  : undefined
 
 function setOnLine(value: boolean) {
-  if (typeof navigator === 'undefined') {
-    ;(globalThis as unknown as { navigator: { onLine: boolean } }).navigator = {
-      onLine: true,
-    }
+  if (!globalRef.navigator) {
+    Object.defineProperty(globalThis, 'navigator', {
+      value: { onLine: true },
+      configurable: true,
+      writable: true,
+    })
   }
-  Object.defineProperty(navigator, 'onLine', { value, configurable: true })
+  Object.defineProperty(globalRef.navigator as { onLine: boolean }, 'onLine', {
+    value,
+    configurable: true,
+  })
 }
 
 beforeEach(() => {
@@ -19,8 +30,10 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks()
-  if (originalOnLine) {
-    Object.defineProperty(navigator, 'onLine', originalOnLine)
+  if (originalOnLine && globalRef.navigator) {
+    Object.defineProperty(globalRef.navigator, 'onLine', originalOnLine)
+  } else if (!hadNavigator && globalRef.navigator) {
+    delete globalRef.navigator
   }
 })
 
