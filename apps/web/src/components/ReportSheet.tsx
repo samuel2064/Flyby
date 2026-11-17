@@ -1,4 +1,4 @@
-﻿import { useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { submitWaitTimeReport } from '../api/waitTimes'
 import { checkpointOptions } from '../data/airports'
 import { canSubmitReport, effectiveCheckpointPick } from '../lib/reportCheckpoint'
@@ -110,7 +110,7 @@ export function ReportSheet({
               Report wait time
             </h2>
             <p className="mt-0.5 text-sm text-slate-500">
-              {airportCode} Â· {activeCheckpoint}
+              {airportCode} · {activeCheckpoint}
             </p>
           </div>
           <button
@@ -203,7 +203,7 @@ export function ReportSheet({
               className="mt-5 inline-flex h-12 w-full items-center justify-center rounded-xl bg-brand-500 text-base font-semibold text-white transition hover:bg-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-500/40 disabled:opacity-60"
             >
               {submitting
-                ? 'Submittingâ€¦'
+                ? 'Submitting…'
                 : rateLimited
                   ? formatWaitMessage(secondsLeft)
                   : canSubmit

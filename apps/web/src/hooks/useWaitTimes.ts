@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { getWaitTimes, POLL_FALLBACK_MS, subscribeToLiveUpdates } from '../api/waitTimes'
+import { fetchWithColdStartRetry } from '../lib/coldStart'
 import { latestPerCheckpoint } from '../lib/latestPerCheckpoint'
 import type { WaitTime, WaitTimeUpdateEvent } from '../api/types'
 
-type FetchState = 'idle' | 'loading' | 'ready' | 'error'
+type FetchState = 'idle' | 'loading' | 'waking' | 'ready' | 'error'
 
 export interface UseWaitTimesResult {
   waitTimes: WaitTime[]
   state: FetchState
+  waking: boolean
   lastUpdated: string | null
   live: boolean
   refresh: () => void
@@ -33,6 +35,7 @@ function applyUpdate(list: WaitTime[], event: WaitTimeUpdateEvent): WaitTime[] {
 export function useWaitTimes(airportCode: string): UseWaitTimesResult {
   const [waitTimes, setWaitTimes] = useState<WaitTime[]>([])
   const [state, setState] = useState<FetchState>('loading')
+  const [waking, setWaking] = useState(false)
   const [lastUpdated, setLastUpdated] = useState<string | null>(null)
   const [live, setLive] = useState(false)
   const [refreshTick, setRefreshTick] = useState(0)
@@ -40,11 +43,14 @@ export function useWaitTimes(airportCode: string): UseWaitTimesResult {
 
   const refresh = useCallback(() => setRefreshTick((t) => t + 1), [])
 
+  // Initial load + manual refresh: retry with backoff on network-level
+  // failures (cold start), showing a "waking up" state instead of an error.
   useEffect(() => {
     let cancelled = false
     setState('loading')
+    setWaking(true)
 
-    getWaitTimes(airportCode)
+    fetchWithColdStartRetry(() => getWaitTimes(airportCode))
       .then((rows) => {
         if (cancelled) return
         setWaitTimes(latestPerCheckpoint(rows))
@@ -54,6 +60,9 @@ export function useWaitTimes(airportCode: string): UseWaitTimesResult {
       .catch(() => {
         if (cancelled) return
         setState('error')
+      })
+      .finally(() => {
+        if (!cancelled) setWaking(false)
       })
 
     return () => {
@@ -98,7 +107,7 @@ export function useWaitTimes(airportCode: string): UseWaitTimesResult {
     }
   }, [airportCode])
 
-  return { waitTimes, state, lastUpdated, live, refresh }
+  return { waitTimes, state, waking, lastUpdated, live, refresh }
 }
 
 export function formatRelativeTime(iso: string | null): string {
