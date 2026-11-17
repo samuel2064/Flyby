@@ -1,5 +1,6 @@
 ﻿import { useCallback, useEffect, useMemo, useState } from 'react'
 import { getWaitTimesSummary } from '../api/summary'
+import { fetchWithColdStartRetry } from '../lib/coldStart'
 import type { AirportSummary } from '../api/summary'
 import {
   filterAirports,
@@ -14,7 +15,7 @@ import {
 
 const AUTO_REFRESH_MS = 60_000
 
-type FetchState = 'loading' | 'ready' | 'error'
+type FetchState = 'loading' | 'waking' | 'ready' | 'error'
 
 interface DashboardProps {
   onSelectAirport: (airport: AirportSummary) => void
@@ -29,9 +30,12 @@ export function Dashboard({ onSelectAirport, onReportWaitTime }: DashboardProps)
   const [state, setState] = useState<FetchState>('loading')
   const [query, setQuery] = useState('')
 
-  const load = useCallback(async () => {
+  // Initial load: retry with backoff on network-level failures (cold start),
+  // showing a "waking up" state instead of an error.
+  const loadWithRetry = useCallback(async () => {
+    setState('waking')
     try {
-      const data = await getWaitTimesSummary()
+      const data = await fetchWithColdStartRetry(() => getWaitTimesSummary())
       setAirports(data.airports)
       setState('ready')
     } catch {
@@ -39,11 +43,23 @@ export function Dashboard({ onSelectAirport, onReportWaitTime }: DashboardProps)
     }
   }, [])
 
+  // Background auto-refresh: try once, silent on failure - keep old data
+  // visible rather than disrupting the view with a transient cold start.
+  const load = useCallback(async () => {
+    try {
+      const data = await getWaitTimesSummary()
+      setAirports(data.airports)
+      setState('ready')
+    } catch {
+      // Silent on background refresh
+    }
+  }, [])
+
   useEffect(() => {
-    void load()
+    void loadWithRetry()
     const timer = setInterval(() => void load(), AUTO_REFRESH_MS)
     return () => clearInterval(timer)
-  }, [load])
+  }, [load, loadWithRetry])
 
   const visible = useMemo(
     () => filterAirports(sortBySeverity(airports), query),
@@ -81,9 +97,11 @@ export function Dashboard({ onSelectAirport, onReportWaitTime }: DashboardProps)
       <p aria-live="polite" className="text-xs text-slate-500">
         {state === 'ready'
           ? `Updated ${formatAge(newest)} · refreshes every 60s`
-          : state === 'loading'
-            ? 'Loading…'
-            : ''}
+          : state === 'waking'
+            ? 'Waking up the service…'
+            : state === 'loading'
+              ? 'Loading…'
+              : ''}
       </p>
 
       {/* Prominent airport search: large input at the top of results (TIR-405 Task 5). */}
@@ -101,9 +119,11 @@ export function Dashboard({ onSelectAirport, onReportWaitTime }: DashboardProps)
         />
       </div>
 
-      {state === 'loading' && (
-        <p className="mt-6 text-sm text-slate-500">Loading airport wait timesâ€¦</p>
-      )}
+      {state === 'loading' || state === 'waking' ? (
+        <p className="mt-6 text-sm text-slate-500">
+          {state === 'waking' ? 'Waking up the service…' : 'Loading airport wait timesâ€¦'}
+        </p>
+      ) : null}
       {state === 'error' && (
         <div className="mt-6 rounded-2xl border border-slate-200 bg-white p-6 text-center shadow-sm">
           <p className="text-sm font-semibold text-slate-900">Could not load the dashboard.</p>

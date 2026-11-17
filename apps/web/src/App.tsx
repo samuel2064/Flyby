@@ -4,6 +4,7 @@ import { useWaitTimes, formatRelativeTime } from './hooks/useWaitTimes'
 import { useForecasts } from './hooks/useForecasts'
 import { buildBestByCheckpoint } from './lib/forecastChip'
 import { buildConsensusByCheckpoint } from './lib/crowdConsensus'
+import { fetchWithColdStartRetry } from './lib/coldStart'
 import { AirportSearch } from './components/AirportSearch'
 import { CheckpointCard } from './components/CheckpointCard'
 import { ReportSheet } from './components/ReportSheet'
@@ -12,6 +13,7 @@ import { SkeletonCard } from './components/SkeletonCard'
 import { Dashboard } from './components/Dashboard'
 import { AirportDetail } from './components/AirportDetail'
 import { getWaitTimesSummary } from './api/summary'
+import { API_BASE_URL } from './api/client'
 import type { AirportSummary } from './api/summary'
 
 // Tabs (TIR-317): dashboard is the default landing view; the original
@@ -32,10 +34,11 @@ export default function App() {
   const [reportTarget, setReportTarget] = useState<{ airportCode: string; checkpoint?: string } | null>(null)
 
   // Fetch all airport summaries once; used by both dashboard list and
-  // URL-driven airport drill (TIR-405 Task 7).
+  // URL-driven airport drill (TIR-405 Task 7). Retries with backoff on
+  // network-level failures so a cold-starting API doesn't fail silently.
   const loadSummaries = useCallback(async () => {
     try {
-      const data = await getWaitTimesSummary()
+      const data = await fetchWithColdStartRetry(() => getWaitTimesSummary())
       setSummaries(data.airports)
     } catch {
       // Dashboard shows its own loading/error UI.
@@ -45,6 +48,12 @@ export default function App() {
   useEffect(() => {
     void loadSummaries()
   }, [loadSummaries])
+
+  // Warm the API on app boot so the first user-visible data request usually
+  // hits a warm Render instance. Non-blocking: does not delay rendering.
+  useEffect(() => {
+    void fetch(`${API_BASE_URL}/api/health`).catch(() => {})
+  }, [])
 
   // URL-based routing: sync view to pathname on load and on back/forward.
   useEffect(() => {
