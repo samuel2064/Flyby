@@ -1,5 +1,6 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { DEFAULT_AIRPORT, checkpointOptions, type Airport } from './data/airports'
+import { API_BASE_URL } from './api/client'
 import { useWaitTimes, formatRelativeTime } from './hooks/useWaitTimes'
 import { useForecasts } from './hooks/useForecasts'
 import { buildBestByCheckpoint } from './lib/forecastChip'
@@ -21,6 +22,12 @@ export default function App() {
   const [tab, setTab] = useState<Tab>('dashboard')
   // Summary row once a dashboard card is drilled into; null = overview.
   const [detailAirport, setDetailAirport] = useState<AirportSummary | null>(null)
+
+  // Warm the API on app boot so the first user-visible data request usually
+  // hits a warm Render instance. Non-blocking: does not delay rendering.
+  useEffect(() => {
+    void fetch(`${API_BASE_URL}/api/health`).catch(() => {})
+  }, [])
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -81,7 +88,7 @@ function SearchReportView() {
   // undefined = closed, null = picker mode (traveler picks the checkpoint),
   // string = fixed checkpoint from a card.
   const [reportTarget, setReportTarget] = useState<string | null | undefined>(undefined)
-  const { waitTimes, state, lastUpdated, live, refresh } = useWaitTimes(airport.code)
+  const { waitTimes, state, waking, lastUpdated, live, refresh } = useWaitTimes(airport.code)
   const { forecasts, loading: forecastsLoading } = useForecasts(airport.code, lastUpdated)
   const bestByCheckpoint = useMemo(
     () => buildBestByCheckpoint(forecasts),
@@ -152,6 +159,9 @@ function SearchReportView() {
                 <SkeletonCard />
                 <SkeletonCard />
               </>
+            )}
+            {waking && (
+              <p className="text-xs text-slate-500">Waking up the service…</p>
             )}
             {state === 'error' && (
               <div className="rounded-2xl border border-slate-200 bg-white p-6 text-center shadow-sm">

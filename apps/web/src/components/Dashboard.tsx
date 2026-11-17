@@ -1,5 +1,6 @@
-﻿import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { getWaitTimesSummary } from '../api/summary'
+import { fetchWithColdStartRetry } from '../lib/coldStart'
 import type { AirportSummary } from '../api/summary'
 import {
   filterAirports,
@@ -14,7 +15,7 @@ import {
 
 const AUTO_REFRESH_MS = 60_000
 
-type FetchState = 'loading' | 'ready' | 'error'
+type FetchState = 'loading' | 'waking' | 'ready' | 'error'
 
 interface DashboardProps {
   // Passes the whole summary row: the drill needs latestReportedAt for its
@@ -30,9 +31,12 @@ export function Dashboard({ onSelectAirport }: DashboardProps) {
   const [state, setState] = useState<FetchState>('loading')
   const [query, setQuery] = useState('')
 
-  const load = useCallback(async () => {
+  // Initial load: retry with backoff on network-level failures (cold start),
+  // showing a "waking up" state instead of an error.
+  const loadWithRetry = useCallback(async () => {
+    setState('waking')
     try {
-      const data = await getWaitTimesSummary()
+      const data = await fetchWithColdStartRetry(() => getWaitTimesSummary())
       setAirports(data.airports)
       setState('ready')
     } catch {
@@ -40,11 +44,23 @@ export function Dashboard({ onSelectAirport }: DashboardProps) {
     }
   }, [])
 
+  // Background auto-refresh: try once, silent on failure - keep old data
+  // visible rather than disrupting the view with a transient cold start.
+  const load = useCallback(async () => {
+    try {
+      const data = await getWaitTimesSummary()
+      setAirports(data.airports)
+      setState('ready')
+    } catch {
+      // Silent on background refresh
+    }
+  }, [])
+
   useEffect(() => {
-    void load()
+    void loadWithRetry()
     const timer = setInterval(() => void load(), AUTO_REFRESH_MS)
     return () => clearInterval(timer)
-  }, [load])
+  }, [loadWithRetry, load])
 
   const visible = useMemo(
     () => filterAirports(sortBySeverity(airports), query),
@@ -71,10 +87,12 @@ export function Dashboard({ onSelectAirport }: DashboardProps) {
         </div>
         <p aria-live="polite" className="text-xs text-slate-500">
           {state === 'ready'
-            ? `Updated ${formatAge(newest)} Â· refreshes every 60s`
-            : state === 'loading'
-              ? 'Loadingâ€¦'
-              : ''}
+            ? `Updated ${formatAge(newest)} · refreshes every 60s`
+            : state === 'waking'
+              ? 'Waking up the service…'
+              : state === 'loading'
+                ? 'Loading…'
+                : ''}
         </p>
       </div>
 
@@ -87,13 +105,15 @@ export function Dashboard({ onSelectAirport }: DashboardProps) {
           type="search"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Filter airports (e.g. JFK or Denver)â€¦"
+          placeholder="Filter airports (e.g. JFK or Denver)…"
           className="w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm text-slate-900 shadow-sm placeholder:text-slate-500 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
         />
       </div>
 
-      {state === 'loading' && (
-        <p className="mt-6 text-sm text-slate-500">Loading airport wait timesâ€¦</p>
+      {(state === 'loading' || state === 'waking') && (
+        <p className="mt-6 text-sm text-slate-500">
+          {state === 'waking' ? 'Waking up the service…' : 'Loading airport wait times…'}
+        </p>
       )}
       {state === 'error' && (
         <div className="mt-6 rounded-2xl border border-slate-200 bg-white p-6 text-center shadow-sm">
@@ -163,7 +183,7 @@ export function Dashboard({ onSelectAirport }: DashboardProps) {
           })}
           {visible.length === 0 && (
             <li className="rounded-2xl border border-slate-200 bg-white p-6 text-center text-sm text-slate-500 sm:col-span-2">
-              No airports match â€œ{query.trim()}â€.
+              No airports match “{query.trim()}”.
             </li>
           )}
         </ul>
