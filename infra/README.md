@@ -39,17 +39,29 @@ How a change reaches production:
    5 minutes, checks that the latest CI run for that exact commit succeeded,
    then triggers the Render deploys for the two service ids above, waits for
    `live`, and verifies the eight production endpoints.
-3. `.github/workflows/render-deploy.yml` in this repo holds no credential, so it
-   only verifies production. If per-service Render deploy hooks are ever added
-   (they are dashboard-only in Render), it deploys through those hooks instead.
+3. The same ops workflow also ensures the static site serves
+   `/manifest.webmanifest` as `application/manifest+json`. Render serves
+   `.webmanifest` as `binary/octet-stream` with `X-Content-Type-Options:
+   nosniff` by default, and Chrome then refuses to parse the web app manifest,
+   which breaks PWA installability. The rule is applied through the Render
+   API (`POST /v1/services/{id}/headers`), so no dashboard access is needed.
 
-Known limitation: both this poll and the keep-alive schedule
+This repo holds no Render credential, so it has no deploy workflow of its own.
+The legacy `.github/workflows/render-deploy.yml` was removed on 2026-11-17
+(TIR-416): with no credential it could only re-verify production, and because
+it ran on every successful `CI` run on `main` it looked like a second deploy
+path. If per-service Render deploy hooks are ever added (they are dashboard-only
+in Render), a hook-based workflow can be reintroduced here or in the ops repo.
+
+Known limitation: the ops poll and the keep-alive schedule
 (`.github/workflows/keepalive.yml`) run on GitHub's scheduler, which drops most
 cron ticks on this account (2 scheduled runs in the 10 hours after
 2026-11-17T02:30Z, with no skipped runs and no Actions minutes overage). A
-merge can therefore take longer than the nominal 5 minutes to reach production;
-the DevOps agent also dispatches the ops workflow after merges, and re-authorizing
-the Render GitHub App for this repo would remove the dependency entirely.
+merge can therefore take longer than the nominal 5 minutes to reach production.
+The reliable unattended trigger is a Paperclip routine ("Flyby production
+deployer (ops repo)") that fires every 5 minutes and dispatches the ops
+workflow; the DevOps agent also dispatches it after merges. Re-authorizing the
+Render GitHub App for this repo would remove the dependency entirely.
 
 Render's own auto-deploy is configured (`autoDeployTrigger: commit` in
 `render.yaml`, applied to both services) but does not fire for this repo: the
