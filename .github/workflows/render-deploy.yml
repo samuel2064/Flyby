@@ -47,10 +47,10 @@ jobs:
           [[ "$WEB_SERVICE_ID" == "srv-dapocsugekts73ek60t0" ]] || { echo "::error::RENDER_WEB_SERVICE_ID must be the Flyby web service id"; exit 1; }
           [[ "$API_SERVICE_ID" == "srv-dak58lm1egvs73957l50" ]] || { echo "::error::RENDER_API_SERVICE_ID must be the Flyby api service id"; exit 1; }
           if [ -z "$WEB_HOOK_URL" ] && [ -z "$API_HOOK_URL" ] && [ -z "$RENDER_API_KEY" ]; then
-            echo "::notice::no Render deploy credential configured; Render auto-deploys both services on push to main"
+            echo "::notice::no Render deploy credential in this repo; the nightlamp ops repo deploys Flyby when main changes (TIR-409)"
           else
-            if [ -n "$WEB_HOOK_URL" ]; then echo "web deploy credential: service deploy hook"; elif [ -n "$RENDER_API_KEY" ]; then echo "web deploy credential: workspace API key"; else echo "web deploy credential: none (Render auto-deploy)"; fi
-            if [ -n "$API_HOOK_URL" ]; then echo "api deploy credential: service deploy hook"; elif [ -n "$RENDER_API_KEY" ]; then echo "api deploy credential: workspace API key"; else echo "api deploy credential: none (Render auto-deploy)"; fi
+            if [ -n "$WEB_HOOK_URL" ]; then echo "web deploy credential: service deploy hook"; elif [ -n "$RENDER_API_KEY" ]; then echo "web deploy credential: workspace API key"; else echo "web deploy credential: none (ops repo deploys)"; fi
+            if [ -n "$API_HOOK_URL" ]; then echo "api deploy credential: service deploy hook"; elif [ -n "$RENDER_API_KEY" ]; then echo "api deploy credential: workspace API key"; else echo "api deploy credential: none (ops repo deploys)"; fi
           fi
 
       - name: Trigger Render deploys
@@ -69,7 +69,7 @@ jobs:
                 "https://api.render.com/v1/services/$sid/deploys")
               echo "$label deploy via workspace API key -> HTTP $code"
             else
-              echo "$label: no deploy credential configured; Render auto-deploys this service on push to main"
+              echo "$label: no deploy credential in this repo; the nightlamp ops repo deploys this service when Flyby main changes"
               return 0
             fi
             jq -c '{deploy: .deploy.id, commit: .commit.id, status}' "/tmp/deploy-$label.json" 2>/dev/null || cat "/tmp/deploy-$label.json"
