@@ -35,6 +35,8 @@ jobs:
     timeout-minutes: 20
     env:
       RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+      WEB_HOOK_URL: ${{ secrets.RENDER_WEB_DEPLOY_HOOK_URL }}
+      API_HOOK_URL: ${{ secrets.RENDER_API_DEPLOY_HOOK_URL }}
       WEB_SERVICE_ID: ${{ vars.RENDER_WEB_SERVICE_ID }}
       API_SERVICE_ID: ${{ vars.RENDER_API_SERVICE_ID }}
       TARGET: ${{ inputs.target || 'both' }}
@@ -42,29 +44,38 @@ jobs:
       - name: Validate configuration
         run: |
           set -euo pipefail
-          test -n "$RENDER_API_KEY" || { echo "::error::RENDER_API_KEY secret is missing"; exit 1; }
+          test -n "$WEB_HOOK_URL" || test -n "$RENDER_API_KEY" || { echo "::error::no deploy credential: set RENDER_WEB_DEPLOY_HOOK_URL or RENDER_API_KEY"; exit 1; }
           [[ "$WEB_SERVICE_ID" =~ ^srv-[a-z0-9]+$ ]] || { echo "::error::RENDER_WEB_SERVICE_ID is missing or malformed"; exit 1; }
           [[ "$API_SERVICE_ID" =~ ^srv-[a-z0-9]+$ ]] || { echo "::error::RENDER_API_SERVICE_ID is missing or malformed"; exit 1; }
-          echo "target=$TARGET web=$WEB_SERVICE_ID api=$API_SERVICE_ID"
+          if [ -n "$WEB_HOOK_URL" ]; then echo "web deploy credential: service deploy hook"; else echo "web deploy credential: workspace API key"; fi
+          if [ -n "$API_HOOK_URL" ]; then echo "api deploy credential: service deploy hook"; else echo "api deploy credential: workspace API key"; fi
 
       - name: Trigger Render deploys
         run: |
           set -euo pipefail
           trigger() {
-            local sid="$1" label="$2" code
-            code=$(curl -sS -o "/tmp/deploy-$label.json" -w '%{http_code}' -X POST \
-              -H "Authorization: Bearer $RENDER_API_KEY" \
-              -H 'Content-Type: application/json' \
-              -d '{}' \
-              "https://api.render.com/v1/services/$sid/deploys")
-            echo "$label deploy -> HTTP $code"
-            jq -c '{id, commit: .commit.id, status, createdAt}' "/tmp/deploy-$label.json" 2>/dev/null || cat "/tmp/deploy-$label.json"
-            test "$code" = "201" || { echo "::error::Render rejected the $label deploy"; exit 1; }
+            local label="$1" hook="$2" sid="$3" code
+            if [ -n "$hook" ]; then
+              code=$(curl -sS -o "/tmp/deploy-$label.json" -w '%{http_code}' -X POST "$hook")
+              echo "$label deploy via service deploy hook -> HTTP $code"
+            else
+              code=$(curl -sS -o "/tmp/deploy-$label.json" -w '%{http_code}' -X POST \
+                -H "Authorization: Bearer $RENDER_API_KEY" \
+                -H 'Content-Type: application/json' \
+                -d '{}' \
+                "https://api.render.com/v1/services/$sid/deploys")
+              echo "$label deploy via workspace API key -> HTTP $code"
+            fi
+            jq -c '{deploy: .deploy.id, commit: .commit.id, status}' "/tmp/deploy-$label.json" 2>/dev/null || cat "/tmp/deploy-$label.json"
+            case "$code" in
+              200|201|202) ;;
+              *) echo "::error::Render rejected the $label deploy"; exit 1 ;;
+            esac
           }
           case "$TARGET" in
-            web) trigger "$WEB_SERVICE_ID" web ;;
-            api) trigger "$API_SERVICE_ID" api ;;
-            both) trigger "$WEB_SERVICE_ID" web; trigger "$API_SERVICE_ID" api ;;
+            web) trigger web "$WEB_HOOK_URL" "$WEB_SERVICE_ID" ;;
+            api) trigger api "$API_HOOK_URL" "$API_SERVICE_ID" ;;
+            both) trigger web "$WEB_HOOK_URL" "$WEB_SERVICE_ID"; trigger api "$API_HOOK_URL" "$API_SERVICE_ID" ;;
             *) echo "::error::unknown target $TARGET"; exit 1 ;;
           esac
 
@@ -72,7 +83,11 @@ jobs:
         run: |
           set -euo pipefail
           wait_live() {
-            local sid="$1" label="$2" status=''
+            local label="$1" sid="$2" status=''
+            if [ -z "$RENDER_API_KEY" ]; then
+              echo "$label: no workspace API key, relying on the production probes"
+              return 0
+            fi
             local deadline=$((SECONDS + 900))
             while [ $SECONDS -lt $deadline ]; do
               status=$(curl -sS -H "Authorization: Bearer $RENDER_API_KEY" \
@@ -89,9 +104,9 @@ jobs:
             return 1
           }
           case "$TARGET" in
-            web) wait_live "$WEB_SERVICE_ID" web ;;
-            api) wait_live "$API_SERVICE_ID" api ;;
-            both) wait_live "$WEB_SERVICE_ID" web; wait_live "$API_SERVICE_ID" api ;;
+            web) wait_live web "$WEB_SERVICE_ID" ;;
+            api) wait_live api "$API_SERVICE_ID" ;;
+            both) wait_live web "$WEB_SERVICE_ID"; wait_live api "$API_SERVICE_ID" ;;
           esac
 
       - name: Verify production
