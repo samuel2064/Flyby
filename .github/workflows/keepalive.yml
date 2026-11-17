@@ -2,7 +2,15 @@ name: Render keep-alive
 
 on:
   schedule:
-    - cron: '*/10 * * * *'
+    # GitHub's scheduler drops most cron ticks on this account (2 scheduled
+    # runs in the 10 hours after 2026-11-17T02:30Z, with no skipped runs and
+    # no minutes overage), so this stays a best-effort second layer only - see
+    # TIR-414. A tick every 5 minutes raises the chance that one lands inside
+    # Render's 15-minute free-tier sleep window.
+    - cron: '*/5 * * * *'
+  push:
+    # Ping right after a deploy so the API is warm for the first user.
+    branches: [main]
   workflow_dispatch:
 
 permissions:
