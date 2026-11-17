@@ -18,6 +18,37 @@ it for programmatic multi-environment management.
 | API web service | `render_web_service` | Node runtime, `apps/api`, health check `/api/health`, runs `prisma migrate deploy` before start |
 | Frontend static site | `render_static_site` | Vite build of `apps/web`, SPA rewrite `/* -> /index.html` |
 
+## Deployment topology (TIR-409)
+
+| Render service | Service id | Type |
+| --- | --- | --- |
+| `flyby-web` | `srv-dapocsugekts73ek60t0` | static site (`apps/web`, publishes `dist`) |
+| `flyby-api` | `srv-dak58lm1egvs73957l50` | web service (`apps/api`, health check `/api/health`) |
+
+Both services live in the Render workspace `tea-8gnu3reo5us7384la60`, which is
+shared with the nightlamp project. A Render API key is **workspace-wide**, so it
+can deploy nightlamp services too. This repo therefore stores **no Render
+credentials at all** (`Actions secrets` for this repo is empty): Flyby CI can no
+longer reach the nightlamp services.
+
+How a change reaches production:
+
+1. A pull request merges into `main` after the CI checks pass.
+2. The nightlamp ops repo (`samuel2064/nightlamp`,
+   `.github/workflows/deploy-flyby.yml`) polls this repo's `main` commit every
+   10 minutes, checks that the latest CI run for that exact commit succeeded,
+   then triggers the Render deploys for the two service ids above, waits for
+   `live`, and verifies the eight production endpoints.
+3. `.github/workflows/render-deploy.yml` in this repo holds no credential, so it
+   only verifies production. If per-service Render deploy hooks are ever added
+   (they are dashboard-only in Render), it deploys through those hooks instead.
+
+Render's own auto-deploy is configured (`autoDeployTrigger: commit` in
+`render.yaml`, applied to both services) but does not fire for this repo: the
+Render GitHub App is authorized for `samuel2064/nightlamp` only, so Render
+receives no push events for `samuel2064/Flyby`. Re-authorizing the app for this
+repo (Render dashboard) would let Render deploy on push again.
+
 ## Prerequisites
 
 - Terraform >= 1.5
