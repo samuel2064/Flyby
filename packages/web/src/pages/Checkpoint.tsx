@@ -474,7 +474,7 @@ export default function Checkpoint() {
 
       {/* Back link */}
       <Link
-        to={`/airport/${data.airportCode.toLowerCase()}`}
+        to={`/airports/${data.airportCode.toLowerCase()}`}
         className="text-brandDark text-sm inline-block hover:underline"
       >
         ← Back to {data.airportName}

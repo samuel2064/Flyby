@@ -197,7 +197,7 @@ export function AirportSearch({
                 }`}
               >
                 <Link
-                  to={`/airport/${airport.code.toLowerCase()}`}
+                  to={`/airports/${airport.code.toLowerCase()}`}
                   onClick={(e) => {
                     e.preventDefault();
                     handleResultClick(airport);

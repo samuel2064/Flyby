@@ -477,6 +477,6 @@ describe('AirportSearch component', () => {
     })
 
     const link = screen.getByRole('link', { name: /John F. Kennedy/ })
-    expect(link).toHaveAttribute('href', '/airport/jfk')
+    expect(link).toHaveAttribute('href', '/airports/jfk')
   })
 })

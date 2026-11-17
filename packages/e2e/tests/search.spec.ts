@@ -24,8 +24,8 @@ test.describe("Search page", () => {
     // Navigate to the airport detail
     await airportLink.first().click();
 
-    // Verify we're on the airport detail page (URL uses lowercase code)
-    await expect(page).toHaveURL(/\/airport\/jfk/);
+    // Verify we're on the airport detail page (canonical plural route, lowercase code)
+    await expect(page).toHaveURL(/\/airports\/jfk/);
   });
 
   test("displays empty state when no results", async ({ page }) => {

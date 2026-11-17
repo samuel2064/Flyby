@@ -53,7 +53,7 @@ export default function Search() {
 
   const handleSelect = useCallback(
     (airport: AirportResult) => {
-      void navigate(`/airport/${airport.code.toLowerCase()}`);
+      void navigate(`/airports/${airport.code.toLowerCase()}`);
     },
     [navigate]
   );
@@ -96,7 +96,7 @@ export default function Search() {
           {(nearbyResults ?? []).map((airport) => (
             <Link
               key={airport.id}
-              to={`/airport/${airport.code.toLowerCase()}`}
+              to={`/airports/${airport.code.toLowerCase()}`}
               className="block bg-white rounded-lg shadow p-4 hover:shadow-md transition"
             >
               <p className="text-lg font-semibold">

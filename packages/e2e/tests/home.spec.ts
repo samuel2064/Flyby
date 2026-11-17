@@ -45,7 +45,7 @@ test.describe("Landing dashboard", () => {
     await expect(jfkRow).toBeVisible({ timeout: 10_000 });
     await jfkRow.click();
 
-    await expect(page).toHaveURL(/\/airport\/JFK$/);
+    await expect(page).toHaveURL(/\/airports\/JFK$/);
     await expect(page.getByRole("heading", { name: /JFK · John F. Kennedy International/ })).toBeVisible();
   });
 });
