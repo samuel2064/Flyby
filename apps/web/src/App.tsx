@@ -191,7 +191,7 @@ export default function App() {
         }}
       />
 
-      <InstallPrompt />
+      <InstallPrompt suppressed={reportTarget !== null} />
     </div>
   )
 }

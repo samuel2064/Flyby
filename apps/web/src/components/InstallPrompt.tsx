@@ -14,6 +14,12 @@ interface BeforeInstallPromptEvent extends Event {
 
 const DISMISS_KEY = 'flyby.install.dismissedUntil'
 
+interface InstallPromptProps {
+  // Suppressed while a modal owns the screen (the report sheet): the prompt
+  // must never sit on top of a dialog the traveler is trying to complete.
+  suppressed?: boolean
+}
+
 function readDismissedUntil(): number | null {
   try {
     const raw = window.localStorage.getItem(DISMISS_KEY)
@@ -33,7 +39,7 @@ function writeDismissedUntil(until: number): void {
   }
 }
 
-export function InstallPrompt() {
+export function InstallPrompt({ suppressed = false }: InstallPromptProps = {}) {
   const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null)
   const [installed, setInstalled] = useState<boolean>(
     () => typeof window !== 'undefined' && window.matchMedia('(display-mode: standalone)').matches,
@@ -62,6 +68,10 @@ export function InstallPrompt() {
       media.removeEventListener('change', onDisplayMode)
     }
   }, [])
+
+  if (suppressed) {
+    return null
+  }
 
   if (!shouldShowInstall({
     promptCaptured: deferredPrompt !== null,
@@ -93,9 +103,9 @@ export function InstallPrompt() {
 
   return (
     <div
-      role="dialog"
+      role="status"
       aria-labelledby="install-prompt-title"
-      className="fixed bottom-4 left-4 z-30 flex max-w-xs items-start gap-3 rounded-2xl border border-slate-200 bg-white p-3.5 shadow-lg"
+      className="fixed bottom-4 left-4 z-20 flex max-w-xs items-start gap-3 rounded-2xl border border-slate-200 bg-white p-3.5 shadow-lg"
       data-testid="install-prompt"
     >
       <svg aria-hidden="true" className="mt-0.5 h-5 w-5 shrink-0 text-brand-700" viewBox="0 0 24 24" fill="currentColor">
