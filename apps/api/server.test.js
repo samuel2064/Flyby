@@ -5,7 +5,7 @@
 // `npm test` works with only production dependencies installed.
 
 delete process.env.DATABASE_URL; // force in-memory mode: deterministic, no DB
-delete process.env.VAPID_PUBLIC_KEY;
+delete process.env.VAPID_PUBLIC_KEY; // ensure no VAPID key leaks into test boot (TIR-364)
 process.env.PORT = '3787'; // dedicated test port; CI boot check uses 3000
 process.env.SSE_KEEPALIVE_MS = '250'; // make keepalive frames observable in tests
 
@@ -1160,7 +1160,10 @@ test('alias DELETE actually removes the record', async () => {
   const created = beforeBody.subscriptions.find((s) => s.airportCode === 'ORD');
   assert.ok(created, 'record created');
 
-  const del = await fetch(`${BASE}/api/subscriptions/${created.id}`, { method: 'DELETE' });
+  const del = await fetch(`${BASE}/api/subscriptions/${created.id}`, {
+    method: 'DELETE',
+    headers: { 'X-Subscription-Auth': 'auth_alias' },
+  });
   assert.equal(del.status, 200);
   assert.deepEqual(await del.json(), { success: true, id: created.id });
 
@@ -1191,7 +1194,7 @@ test('alias DELETE enforces the ownership guard on mismatched X-User-Id', async 
 
   const forbiddenDel = await fetch(`${BASE}/api/push/subscriptions/${created.id}`, {
     method: 'DELETE',
-    headers: { 'X-User-Id': 'alias-guard-attacker' },
+    headers: { 'X-User-Id': 'alias-guard-attacker', 'X-Subscription-Auth': 'auth_guard' },
   });
   assert.equal(forbiddenDel.status, 403);
   assert.deepEqual(await forbiddenDel.json(), {
@@ -1202,10 +1205,11 @@ test('alias DELETE enforces the ownership guard on mismatched X-User-Id', async 
   const stillThere = await fetch(`${BASE}/api/notifications/alias-guard-owner`);
   assert.ok((await stillThere.json()).subscriptions.some((s) => s.id === created.id));
 
-  // cleanup by the owner (canonical behavior also reachable on the aliases)
+  // cleanup by the owner (canonical behavior also reachable on the aliases):
+  // the capability is what authorizes; the matching X-User-Id is incidental.
   const okDel = await fetch(`${BASE}/api/push/subscriptions/${created.id}`, {
     method: 'DELETE',
-    headers: { 'X-User-Id': 'alias-guard-owner' },
+    headers: { 'X-User-Id': 'alias-guard-owner', 'X-Subscription-Auth': 'auth_guard' },
   });
   assert.equal(okDel.status, 200);
 });
@@ -1501,4 +1505,231 @@ test('rate limiter buckets identities independently: aliased report body fields 
   assert.equal(aliasBody.airport, 'JFK', 'canonical uppercase code echoed');
   const second = await postWaitTime('ratelimit-flow-d');
   assert.equal(second.status, 429, 'identity throttle applies across write paths');
+});
+
+// --- TIR-364: VAPID boot bug — API must boot without valid VAPID keys ---------
+// No hardcoded VAPID fallback: /api/vapid-public-key returns 503 when
+// VAPID_PUBLIC_KEY is not configured, never crashes at boot.
+
+test('GET /api/vapid-public-key returns 503 when VAPID_PUBLIC_KEY is unset (TIR-364)', async () => {
+  await ready;
+  delete process.env.VAPID_PUBLIC_KEY;
+  const res = await fetch(`${BASE}/api/vapid-public-key`);
+  assert.equal(res.status, 503);
+  const body = await res.json();
+  assert.equal(body.error, 'Push notifications not configured: VAPID_PUBLIC_KEY is not set');
+});
+
+test('GET /api/vapid-public-key alias paths all return 503 when unset (TIR-364)', async () => {
+  await ready;
+  for (const path of ['/api/push/vapid-public-key', '/api/push/vapidPublicKey', '/api/notifications/vapid-public-key']) {
+    const res = await fetch(`${BASE}${path}`);
+    assert.equal(res.status, 503, `${path} should return 503`);
+  }
+});
+
+const { vapidHandler } = require('./server.js');
+
+test('vapidHandler returns 503 when no key is provided (TIR-364)', () => {
+  const calls = [];
+  const mockRes = {
+    status: (code) => { calls.push({ status: code }); return mockRes; },
+    json: (obj) => { calls.push({ json: obj }); return mockRes; },
+  };
+  vapidHandler({}, mockRes);
+  assert.equal(calls[0].status, 503);
+  assert.equal(calls[1].json.error, 'Push notifications not configured: VAPID_PUBLIC_KEY is not set');
+});
+
+// --- TIR-391: subscription deletion requires a capability, not a header ------
+// The registering browser is the only holder of the subscription's `auth` push
+// key, so deletion must demand it. X-User-Id alone never authorizes anything:
+// omitting the header used to skip the ownership check entirely, and knowing
+// the victim's user id used to forge it.
+
+const deleteSub = (id, headers) =>
+  fetch(`${BASE}/api/subscriptions/${id}`, { method: 'DELETE', headers });
+
+const createSub = async (endpointSuffix, auth, userId) => {
+  await fetch(`${BASE}/api/subscriptions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      endpoint: `https://fcm.googleapis.com/fcm/send/cap-${endpointSuffix}`,
+      p256dh: `BK_${endpointSuffix}`,
+      auth,
+      airportId: 'apt-jfk',
+      userId,
+    }),
+  });
+  const list = await fetch(`${BASE}/api/notifications/${userId}`);
+  const created = (await list.json()).subscriptions.find((s) => s.airportCode === 'JFK');
+  assert.ok(created, 'subscription created');
+  return created;
+};
+
+test('DELETE subscription without a capability returns 401 and keeps the record (TIR-391)', async () => {
+  await ready;
+  const created = await createSub('noheader', 'auth_cap_noheader', 'cap-user-1');
+  const del = await deleteSub(created.id, {});
+  assert.equal(del.status, 401, 'missing capability must not delete (old hole: skipped ownership check)');
+  assert.equal((await del.json()).error, 'unauthorized');
+  const stillThere = await fetch(`${BASE}/api/notifications/cap-user-1`);
+  assert.ok((await stillThere.json()).subscriptions.some((s) => s.id === created.id));
+  const ok = await deleteSub(created.id, { 'X-Subscription-Auth': 'auth_cap_noheader' });
+  assert.equal(ok.status, 200, 'the legitimate capability holder can still delete');
+});
+
+test('DELETE with a forged owner X-User-Id but no capability is still unauthorized (TIR-391)', async () => {
+  await ready;
+  const created = await createSub('forgedid', 'auth_cap_forged', 'cap-user-2');
+  const del = await deleteSub(created.id, { 'X-User-Id': 'cap-user-2' });
+  assert.equal(del.status, 401, 'client-asserted identity headers are not authentication');
+  const stillThere = await fetch(`${BASE}/api/notifications/cap-user-2`);
+  assert.ok((await stillThere.json()).subscriptions.some((s) => s.id === created.id));
+  await deleteSub(created.id, { 'X-Subscription-Auth': 'auth_cap_forged' });
+});
+
+test('DELETE with a wrong capability returns 401 and keeps the record (TIR-391)', async () => {
+  await ready;
+  const created = await createSub('wrongcap', 'auth_cap_wrong', 'cap-user-3');
+  const del = await deleteSub(created.id, { 'X-Subscription-Auth': 'not-the-real-auth-key' });
+  assert.equal(del.status, 401, 'a wrong capability is a failed authentication, same as a missing one');
+  assert.equal((await del.json()).error, 'unauthorized');
+  const stillThere = await fetch(`${BASE}/api/notifications/cap-user-3`);
+  assert.ok((await stillThere.json()).subscriptions.some((s) => s.id === created.id));
+  await deleteSub(created.id, { 'X-Subscription-Auth': 'auth_cap_wrong' });
+});
+
+// --- TIR-391: report-write hardening ------------------------------------------
+
+test('reports for checkpoints outside the shared airport data return 400 (TIR-391)', async () => {
+  await ready;
+  const res = await fetch(`${BASE}/api/wait-times`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-User-Id': 'checkpoint-guard-user' },
+    body: JSON.stringify({ airport: 'JFK', checkpoint: 'Ghost Terminal Security', waitMinutes: 10 }),
+  });
+  assert.equal(res.status, 400);
+  const body = await res.json();
+  assert.ok(
+    body.errors.some((e) => e.field === 'checkpoint'),
+    'error names the checkpoint field'
+  );
+});
+
+test("the old implicit 'Main' default is rejected for airports without a Main checkpoint (TIR-391)", async () => {
+  await ready;
+  // ATL's canonical list has no 'Main'; the write path must not invent one.
+  const res = await fetch(`${BASE}/api/wait-times`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-User-Id': 'checkpoint-guard-atl' },
+    body: JSON.stringify({ airport: 'ATL', checkpoint: 'Main', waitMinutes: 10 }),
+  });
+  assert.equal(res.status, 400);
+  // And a real ATL checkpoint is accepted.
+  const ok = await fetch(`${BASE}/api/wait-times`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-User-Id': 'checkpoint-guard-atl-ok' },
+    body: JSON.stringify({ airport: 'ATL', checkpoint: 'Domestic North Checkpoint A', waitMinutes: 12 }),
+  });
+  assert.equal(ok.status, 201);
+});
+
+test('report ids are collision-resistant under same-millisecond writes (TIR-391)', async () => {
+  await ready;
+  const [a, b, c] = await Promise.all([
+    postWaitTime('collision-user-a', 14),
+    postWaitTime('collision-user-b', 15),
+    postWaitTime('collision-user-c', 16),
+  ]);
+  assert.equal(a.status, 201);
+  assert.equal(b.status, 201);
+  assert.equal(c.status, 201);
+  const ids = [(await a.json()).id, (await b.json()).id, (await c.json()).id];
+  assert.equal(new Set(ids).size, 3, 'ids must be unique even within the same millisecond');
+  for (const id of ids) assert.match(id, /^[A-Za-z0-9_-]{1,64}$/, 'id stays within the admin-delete charset');
+});
+
+// --- TIR-392: database outage must never look like success --------------------
+
+const { __testHooks } = require('./server.js');
+
+test('failed report persistence answers 500, is never broadcast, and reads as unavailable (TIR-392)', async () => {
+  await ready;
+  __testHooks.setDb({
+    waitTimeReport: {
+      create: async () => {
+        throw new Error('boom: connection refused');
+      },
+      findMany: async () => {
+        throw new Error('boom: connection refused');
+      },
+    },
+  });
+  const jfk = openSSE('JFK');
+  try {
+    await jfk.waitFor((ev) => ev.type === 'connected', 5000);
+
+    const res = await fetch(`${BASE}/api/wait-times`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-User-Id': 'outage-user-1' },
+      body: JSON.stringify({ airport: 'JFK', checkpoint: 'Main', waitMinutes: 21 }),
+    });
+    assert.equal(res.status, 500, 'a failed database write must not answer 201');
+    assert.deepEqual(await res.json(), { error: 'Database unavailable' });
+
+    const readRes = await fetch(`${BASE}/api/wait-times?airport=JFK`);
+    assert.equal(readRes.status, 500, 'a DB outage must not read as an airport with no reports');
+    assert.deepEqual(await readRes.json(), { error: 'Database unavailable' });
+
+    const events = await jfk.collectQuietly(500);
+    assert.ok(
+      !events.some((ev) => ev.type === 'wait-time-update'),
+      'unsuccessful reports must never be broadcast over SSE'
+    );
+  } finally {
+    jfk.close();
+    __testHooks.setDb(null);
+  }
+});
+
+test('report writes recover with 201 once the database is available again (TIR-392)', async () => {
+  await ready;
+  const res = await fetch(`${BASE}/api/wait-times`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-User-Id': 'outage-recovery-user' },
+    body: JSON.stringify({ airport: 'JFK', checkpoint: 'Main', waitMinutes: 22 }),
+  });
+  assert.equal(res.status, 201, 'after the stubbed outage the write path is healthy again');
+  const body = await res.json();
+  assert.equal(body.airport, 'JFK');
+  assert.equal(body.waitMinutes, 22);
+});
+
+// --- TIR-391: per-IP abuse ceiling (identity rotation no longer scales) -------
+// NOTE: this test intentionally saturates the 127.0.0.1 per-IP window and MUST
+// stay last in the file - every earlier report POST shares the same window.
+
+// Default ceiling is 100/30s and earlier tests already consumed part of the
+// window; this bound leaves headroom for the trip to happen inside the loop.
+const REPORT_IP_PROBE_LIMIT = 130;
+
+test('rotating report identities from one IP eventually hits the per-IP ceiling (TIR-391)', async () => {
+  await ready;
+  let saw429 = null;
+  // The suite has already spent part of this window; a bounded loop proves the
+  // ceiling trips without depending on the exact count consumed so far.
+  for (let i = 0; i < REPORT_IP_PROBE_LIMIT; i += 1) {
+    const res = await postWaitTime(`ip-rotation-probe-${i}`, 9);
+    if (res.status === 429) {
+      saw429 = res;
+      break;
+    }
+    assert.equal(res.status, 201, `probe ${i} should be accepted before the ceiling`);
+  }
+  assert.ok(saw429, 'identity rotation must hit the per-IP ceiling, not scale forever');
+  assert.ok(saw429.headers.get('Retry-After') !== null, 'ceiling 429 carries Retry-After');
+  const body = await saw429.json();
+  assert.ok(body.errors.some((e) => e.field === 'rateLimit'));
 });

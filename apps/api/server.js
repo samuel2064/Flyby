@@ -1,5 +1,10 @@
 // TIR-346 no-op redeploy marker: forces a fresh Render build of the API
 // service to rule out a wedged deploy during the 2026-10 outage triage.
+// NOTE (TIR-392 takeover): a stray `require('sentry-node')` WIP line used to
+// sit here; the package is not installed under that name and the require was
+// unused, so it crashed the service at boot. Removed before shipping the P0
+// persistence/auth fixes; Sentry wiring belongs behind a reviewed change that
+// also lands the lockfile + init.
 const express = require('express');
 const crypto = require('crypto');
 // Single source of truth for airport + checkpoint data, shared with apps/web
@@ -82,7 +87,6 @@ try {
 
 const subscriptions = new Map();
 let subSeq = 1;
-
 // --- SSE live updates -------------------------------------------------------
 // TIR-314: the stream carries only REAL wait-time updates. When a report is
 // accepted (POST /api/wait-times), it fans out to the SSE clients subscribed
@@ -189,7 +193,12 @@ app.get('/api/wait-times', async (req, res) => {
       );
     }
   } catch (err) {
-    console.warn(`GET /api/wait-times DB read failed: ${err.message}`);
+    // TIR-392: a database outage must not read as "an airport with no
+    // reports" - an empty array is a factual claim travelers act on. Fail
+    // closed with 5xx so clients can distinguish empty-but-healthy from
+    // service-unavailable instead of showing a phantom quiet checkpoint.
+    console.error(`GET /api/wait-times DB read failed: ${err.message}`);
+    return res.status(500).json({ error: 'Database unavailable' });
   }
   res.json([]);
 });
@@ -197,11 +206,23 @@ app.get('/api/wait-times', async (req, res) => {
 const REPORT_RATE_LIMIT_MS = 30000;
 const REPORT_RATE_LIMIT_MAX_ENTRIES = 1000;
 const reportRateLimits = new Map();
+// TIR-391: per-IP abuse ceiling over the identity-keyed traveler window.
+const REPORT_IP_RATE_LIMIT = Number(process.env.REPORT_IP_RATE_LIMIT) > 0
+  ? Number(process.env.REPORT_IP_RATE_LIMIT)
+  : 100;
+const reportIpCounts = new Map(); // ip -> { count, windowStart }
 
+// TIR-391: rate-limit identity used to come from client-controlled fields
+// (X-User-Id header / userId / reporter body fields) ALONE, so rotating the
+// header bought a fresh 30s window per request. The key is now composite:
+// the IP prefix keeps every identity rotation from one address accountable
+// to the same per-IP ceiling above, while the identity sub-bucket preserves
+// the per-traveler 30s window the PWA and QA corpus rely on.
 function reportLimitKey(req, body) {
   const identity = req.get('X-User-Id') || body.userId || body.reporter || null;
-  if (identity) return `user:${String(identity)}`;
-  return `ip:${req.ip || 'unknown'}`;
+  const ip = req.ip || 'unknown';
+  if (identity) return `ip:${ip}|user:${String(identity)}`;
+  return `ip:${ip}`;
 }
 
 const MAX_WAIT_MINUTES = 300;
@@ -242,7 +263,22 @@ const reportHandler = async (req, res) => {
   if (!AIRPORTS.some((a) => a.code === airportCode)) {
     return res.status(404).json({ error: 'Airport not found' });
   }
+  // Checkpoint validation (TIR-391): a report must target a checkpoint that
+  // actually belongs to the selected airport. The shared data file is the
+  // single source of truth (same list the PWA picker offers), so fabricated
+  // checkpoint names can no longer pollute per-checkpoint aggregates.
+  const knownCheckpoints = CHECKPOINTS_BY_AIRPORT[airportCode] || [];
   const checkpointName = String(body.checkpoint || 'Main');
+  if (!knownCheckpoints.includes(checkpointName)) {
+    return res.status(400).json({
+      errors: [
+        {
+          field: 'checkpoint',
+          message: `Unknown checkpoint for ${airportCode}; valid checkpoints: ${knownCheckpoints.join(', ')}`,
+        },
+      ],
+    });
+  }
 
   const limitKey = reportLimitKey(req, body);
   const now = Date.now();
@@ -260,10 +296,43 @@ const reportHandler = async (req, res) => {
       .json({ errors: [{ field: 'rateLimit', message: `Too many reports; retry in ${retryAfterSec}s` }] });
   }
 
-  const id = `rpt_${Date.now()}`;
+  // TIR-391: per-IP abuse cap. The traveler-facing 30s window is keyed by a
+  // client-asserted identity (QA contract + PWA retry UX), which an abuser
+  // could previously rotate for a fresh window on every request. The
+  // unspoofable IP prefix bounds total writes from one address per window
+  // (default REPORT_IP_RATE_LIMIT=100 per 30s; tunable per environment).
+  if (reportIpCounts.size > REPORT_RATE_LIMIT_MAX_ENTRIES) {
+    for (const [key, entry] of reportIpCounts) {
+      if (now - entry.windowStart >= REPORT_RATE_LIMIT_MS) reportIpCounts.delete(key);
+    }
+  }
+  const ipKey = req.ip || 'unknown';
+  let ipEntry = reportIpCounts.get(ipKey);
+  if (!ipEntry || now - ipEntry.windowStart >= REPORT_RATE_LIMIT_MS) {
+    ipEntry = { count: 0, windowStart: now };
+    reportIpCounts.set(ipKey, ipEntry);
+  }
+  ipEntry.count += 1;
+  if (ipEntry.count > REPORT_IP_RATE_LIMIT) {
+    const retryAfterSec = Math.ceil((ipEntry.windowStart + REPORT_RATE_LIMIT_MS - now) / 1000);
+    return res
+      .status(429)
+      .set('Retry-After', String(Math.max(1, retryAfterSec)))
+      .json({
+        errors: [
+          { field: 'rateLimit', message: `Too many reports from this network; retry in ${Math.max(1, retryAfterSec)}s` },
+        ],
+      });
+  }
+
+  // TIR-391: collision-resistant report ids. `rpt_<epoch-ms>` let two
+  // same-millisecond submissions collide on the primary key; a random hex
+  // suffix makes that practically impossible while staying inside the
+  // REPORT_ID_PATTERN charset the admin-delete endpoint validates against.
+  const id = `rpt_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
   const receivedAt = new Date().toISOString();
-  try {
-    if (db) {
+  if (db) {
+    try {
       await db.waitTimeReport.create({
         data: {
           id,
@@ -273,9 +342,15 @@ const reportHandler = async (req, res) => {
           reporter: body.reporter || body.userId || null,
         },
       });
+    } catch (err) {
+      // TIR-392: a failed persistence attempt must never surface as an
+      // accepted report. Fail closed: no 201, no SSE broadcast, no
+      // rate-limit slot consumed (the traveler can retry the moment the
+      // database recovers), and a 5xx naming the real problem - matching
+      // every other Database-unavailable path in this service.
+      console.error(`POST /api/wait-times persistence failed: ${err.message}`);
+      return res.status(500).json({ error: 'Database unavailable' });
     }
-  } catch (err) {
-    console.warn(`POST /api/wait-times/report DB fallback: ${err.message}`);
   }
   reportRateLimits.set(limitKey, Date.now());
   // Real-time fan-out (TIR-314): every accepted report is pushed to the SSE
@@ -324,11 +399,16 @@ function configuredAdminKey() {
 }
 
 // Constant-time compare over sha256 digests so the key length cannot leak
-// through timingSafeEqual's throw-on-length-mismatch behavior.
-function adminKeyMatches(provided, expected) {
+// through timingSafeEqual's throw-on-length-mismatch behavior. Shared by the
+// admin key and the subscription-deletion capability (TIR-391).
+function sha256Matches(provided, expected) {
   const providedHash = crypto.createHash('sha256').update(provided).digest();
   const expectedHash = crypto.createHash('sha256').update(expected).digest();
   return crypto.timingSafeEqual(providedHash, expectedHash);
+}
+
+function adminKeyMatches(provided, expected) {
+  return sha256Matches(provided, expected);
 }
 
 function extractAdminKey(req) {
@@ -617,7 +697,9 @@ app.post('/api/moderation/reports/:id/clear', async (req, res) => {
 
 // --- VAPID / push notifications --------------------------------------------
 
-// VAPID public key (multiple alias paths for client compatibility)
+// VAPID public key (multiple alias paths for client compatibility).
+// Environment-only, read per request: no hardcoded fallback, and a key
+// provided after boot is still honored (TIR-364).
 const vapidHandler = (req, res) => {
   const publicKey = process.env.VAPID_PUBLIC_KEY;
   if (!publicKey) {
@@ -838,17 +920,42 @@ app.get('/api/push/subscriptions', listHandler);
 app.get('/api/subscriptions', listHandler);
 
 // Delete subscription by id (QA spec: DELETE /api/notifications/:subscriptionId)
+// TIR-391: deletion now requires a capability, not a client-asserted identity.
+// The registering browser is the only holder of the subscription's `auth` push
+// key, so the caller must present it (X-Subscription-Auth header, or `auth` in
+// a JSON body). The previous X-User-Id ownership check was not authentication:
+// omitting the header skipped it entirely and knowing the victim's user id
+// forged it. X-User-Id is retained as defense-in-depth only. Ladder:
+//   404 unknown id | 401 missing or wrong capability | 403 valid capability
+//   but X-User-Id mismatch | 200 deleted.
 const deleteByIdHandler = async (req, res) => {
   const id = req.params.id;
   const requester = req.get('X-User-Id');
+  const capability =
+    req.get('X-Subscription-Auth') ||
+    (req.body && typeof req.body === 'object' && typeof req.body.auth === 'string'
+      ? req.body.auth
+      : null);
+  const unauthorized = () =>
+    res.status(401).json({
+      error: 'unauthorized',
+      message: 'Subscription deletion requires the X-Subscription-Auth capability issued at subscribe time',
+    });
   const forbidden = (sub) =>
     requester && sub.userId && sub.userId !== 'anonymous' && requester !== sub.userId;
+  const capabilityMatches = (sub) =>
+    typeof sub.auth === 'string' &&
+    sub.auth.length > 0 &&
+    typeof capability === 'string' &&
+    capability.length > 0 &&
+    sha256Matches(capability, sub.auth);
   if (db) {
     try {
       const sub =
         (await db.notificationSubscription.findUnique({ where: { id } })) ||
         (await db.notificationSubscription.findFirst({ where: { endpoint: id } }));
       if (!sub) return res.status(404).json({ error: 'not_found', id });
+      if (!capabilityMatches(sub)) return unauthorized();
       if (forbidden(sub)) {
         return res.status(403).json({ error: 'forbidden', message: 'Cannot delete another user\'s subscription' });
       }
@@ -860,6 +967,7 @@ const deleteByIdHandler = async (req, res) => {
   }
   const sub = findSubscription(id);
   if (!sub) return res.status(404).json({ error: 'not_found', id });
+  if (!capabilityMatches(sub)) return unauthorized();
   if (forbidden(sub)) {
     return res.status(403).json({ error: 'forbidden', message: 'Cannot delete another user\'s subscription' });
   }
@@ -1842,3 +1950,14 @@ module.exports.computeWaitStats = computeWaitStats;
 // Exposed for the test suite: cross-airport summary core (TIR-321 scope merge)
 // exercised directly (latest wait, trend windows, empty airports) without a DB.
 module.exports.computeWaitTimesSummary = computeWaitTimesSummary;
+// Exposed for the test suite: VAPID handler (TIR-364) exercised directly with
+// a key override to cover both the configured and unconfigured paths.
+module.exports.vapidHandler = vapidHandler;
+// Test seam (TIR-392 outage tests): swap the Prisma client for a stub so the
+// DB write/read paths can be exercised without a real database. Not a public
+// API; production code never calls this.
+module.exports.__testHooks = {
+  setDb(client) {
+    db = client;
+  },
+};
