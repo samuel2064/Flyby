@@ -6,6 +6,7 @@ import { useOnlineStatus } from './hooks/useOnlineStatus'
 import { useForecasts } from './hooks/useForecasts'
 import { buildBestByCheckpoint } from './lib/forecastChip'
 import { buildConsensusByCheckpoint } from './lib/crowdConsensus'
+import { parseRoute } from './lib/routes'
 import { AirportSearch } from './components/AirportSearch'
 import { CheckpointCard } from './components/CheckpointCard'
 import { ReportSheet } from './components/ReportSheet'
@@ -57,13 +58,13 @@ export default function App() {
   // URL-based routing: sync view to pathname on load and on back/forward.
   useEffect(() => {
     const syncViewFromUrl = () => {
-      const path = window.location.pathname
-      if (path === '/search') {
+      const route = parseRoute(window.location.pathname)
+      if (route.view === 'search') {
         setView('search')
         setTab('search')
         setDetailAirport(null)
-      } else if (path.startsWith('/airport/')) {
-        const code = path.slice('/airport/'.length).toUpperCase()
+      } else if (route.view === 'airport' && route.airportCode) {
+        const code = route.airportCode
         const summary = summaries.find((s) => s.airport === code)
         if (summary) {
           setView('airport')
