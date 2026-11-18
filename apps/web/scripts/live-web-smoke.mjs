@@ -140,16 +140,21 @@ async function attempt(n) {
 
     // TIR-377 Task 7 acceptance: a shared airport link must open that
     // airport, not the dashboard shell. The plural /airports/:code form is
-    // accepted alongside /airport/:code.
-    await page.goto(`${BASE}/airports/JFK`, { waitUntil: 'networkidle', timeout: 120_000 })
-    await page.waitForSelector('#detail-heading', { timeout: 60_000, state: 'visible' })
-    const detailHeading = (await page.locator('#detail-heading').textContent()) ?? ''
-    if (!detailHeading.includes('JFK')) {
-      fail(`plural airport deep link rendered "${detailHeading}" instead of JFK`)
+    // accepted alongside /airport/:code. This is a deployed-contract check:
+    // it only holds once the bundle that carries the route fix is live, so it
+    // runs on the scheduled smoke (REQUIRE_DEPLOYED_CONTRACT), not on pull
+    // requests that probe the currently deployed bundle.
+    if (REQUIRE_DEPLOYED_CONTRACT) {
+      await page.goto(`${BASE}/airports/JFK`, { waitUntil: 'networkidle', timeout: 120_000 })
+      await page.waitForSelector('#detail-heading', { timeout: 60_000, state: 'visible' })
+      const detailHeading = (await page.locator('#detail-heading').textContent()) ?? ''
+      if (!detailHeading.includes('JFK')) {
+        fail(`plural airport deep link rendered "${detailHeading}" instead of JFK`)
+      }
+      console.log('  deep link /airports/JFK renders the JFK detail view')
+      await page.goto(BASE, { waitUntil: 'networkidle', timeout: 120_000 })
+      await page.waitForSelector('#dashboard-filter', { state: 'visible', timeout: 60_000 })
     }
-    console.log('  deep link /airports/JFK renders the JFK detail view')
-    await page.goto(BASE, { waitUntil: 'networkidle', timeout: 120_000 })
-    await page.waitForSelector('#dashboard-filter', { state: 'visible', timeout: 60_000 })
 
     if (errors.length > 0) fail(`console errors: ${errors.join(' | ')}`)
 
