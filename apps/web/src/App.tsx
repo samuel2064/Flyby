@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { DEFAULT_AIRPORT, checkpointOptions, type Airport } from './data/airports'
 import { API_BASE_URL } from './api/client'
 import { useWaitTimes, formatRelativeTime } from './hooks/useWaitTimes'
@@ -13,21 +13,104 @@ import { InstallPrompt } from './components/InstallPrompt'
 import { SkeletonCard } from './components/SkeletonCard'
 import { Dashboard } from './components/Dashboard'
 import { AirportDetail } from './components/AirportDetail'
+import { getWaitTimesSummary } from './api/summary'
 import type { AirportSummary } from './api/summary'
 
 // Tabs (TIR-317): dashboard is the default landing view; the original
 // search-and-report flow lives under its own tab, untouched.
 type Tab = 'dashboard' | 'search'
 
+// URL-based views (TIR-405 Task 7): / → dashboard, /search → search,
+// /airport/:code → per-airport drill. Shareable + back/forward via history API.
+type View = 'dashboard' | 'search' | 'airport'
+
 export default function App() {
   const [tab, setTab] = useState<Tab>('dashboard')
+  const [view, setView] = useState<View>('dashboard')
+  const [summaries, setSummaries] = useState<AirportSummary[]>([])
   // Summary row once a dashboard card is drilled into; null = overview.
   const [detailAirport, setDetailAirport] = useState<AirportSummary | null>(null)
+  // null = closed, {airportCode} = picker mode, {airportCode, checkpoint} = fixed checkpoint.
+  const [reportTarget, setReportTarget] = useState<{ airportCode: string; checkpoint?: string } | null>(null)
+
+  // Fetch all airport summaries once; used by both dashboard list and
+  // URL-driven airport drill (TIR-405 Task 7).
+  const loadSummaries = useCallback(async () => {
+    try {
+      const data = await getWaitTimesSummary()
+      setSummaries(data.airports)
+    } catch {
+      // Dashboard shows its own loading/error UI.
+    }
+  }, [])
+
+  useEffect(() => {
+    void loadSummaries()
+  }, [loadSummaries])
 
   // Warm the API on app boot so the first user-visible data request usually
   // hits a warm Render instance. Non-blocking: does not delay rendering.
   useEffect(() => {
     void fetch(`${API_BASE_URL}/api/health`).catch(() => {})
+  }, [])
+
+  // URL-based routing: sync view to pathname on load and on back/forward.
+  useEffect(() => {
+    const syncViewFromUrl = () => {
+      const path = window.location.pathname
+      if (path === '/search') {
+        setView('search')
+        setTab('search')
+        setDetailAirport(null)
+      } else if (path.startsWith('/airport/')) {
+        const code = path.slice('/airport/'.length).toUpperCase()
+        const summary = summaries.find((s) => s.airport === code)
+        if (summary) {
+          setView('airport')
+          setDetailAirport(summary)
+          setTab('dashboard')
+        }
+      } else {
+        setView('dashboard')
+        setTab('dashboard')
+        setDetailAirport(null)
+      }
+    }
+
+    syncViewFromUrl()
+
+    const handlePopState = () => syncViewFromUrl()
+    window.addEventListener('popstate', handlePopState)
+    return () => window.removeEventListener('popstate', handlePopState)
+  }, [summaries])
+
+  const navigateToAirport = useCallback((code: string) => {
+    const url = `/airport/${code.toUpperCase()}`
+    window.history.pushState({}, '', url)
+    const summary = summaries.find((s) => s.airport === code.toUpperCase())
+    if (summary) {
+      setView('airport')
+      setDetailAirport(summary)
+      setTab('dashboard')
+    }
+  }, [summaries])
+
+  const navigateToDashboard = useCallback(() => {
+    window.history.pushState({}, '', '/')
+    setView('dashboard')
+    setTab('dashboard')
+    setDetailAirport(null)
+  }, [])
+
+  const navigateToSearch = useCallback(() => {
+    window.history.pushState({}, '', '/search')
+    setView('search')
+    setTab('search')
+    setDetailAirport(null)
+  }, [])
+
+  const openReportSheet = useCallback((airportCode: string, checkpoint?: string) => {
+    setReportTarget({ airportCode, checkpoint })
   }, [])
 
   return (
@@ -51,7 +134,15 @@ export default function App() {
                 key={value}
                 type="button"
                 aria-pressed={tab === value}
-                onClick={() => setTab(value)}
+                onClick={() => {
+                  setTab(value)
+                  if (value === 'search') {
+                    navigateToSearch()
+                  } else {
+                    navigateToDashboard()
+                  }
+                  setDetailAirport(null)
+                }}
                 className={`min-h-11 rounded-full px-3 text-xs font-semibold transition focus:outline-none focus:ring-2 focus:ring-white/40 sm:min-h-0 sm:px-4 ${
                   tab === value ? 'bg-white text-brand-900' : 'text-white/80 hover:text-white'
                 }`}
@@ -64,14 +155,22 @@ export default function App() {
       </header>
 
       <main className="mx-auto max-w-3xl px-4 pb-16 sm:px-6">
-        {tab === 'dashboard' ? (
-          detailAirport ? (
-            <AirportDetail summary={detailAirport} onBack={() => setDetailAirport(null)} />
-          ) : (
-            <Dashboard onSelectAirport={setDetailAirport} />
-          )
+        {view === 'airport' && detailAirport ? (
+          <AirportDetail
+            summary={detailAirport}
+            onBack={navigateToDashboard}
+            onReportWaitTime={() => openReportSheet(detailAirport.airport)}
+          />
+        ) : view === 'search' ? (
+          <SearchReportView
+            onSelectAirport={(code) => navigateToAirport(code)}
+            onReportWaitTime={openReportSheet}
+          />
         ) : (
-          <SearchReportView />
+          <Dashboard
+            onSelectAirport={(summary) => navigateToAirport(summary.airport)}
+            onReportWaitTime={openReportSheet}
+          />
         )}
 
         <p className="mt-10 text-center text-xs text-slate-500">
@@ -79,16 +178,31 @@ export default function App() {
         </p>
       </main>
 
+      <ReportSheet
+        open={reportTarget !== null}
+        airportCode={reportTarget?.airportCode ?? ''}
+        checkpoint={reportTarget?.checkpoint}
+        onClose={() => setReportTarget(null)}
+        onReported={() => {
+          setReportTarget(null)
+          // Refresh dashboard data after a report
+          void loadSummaries()
+        }}
+      />
+
       <InstallPrompt />
     </div>
   )
 }
 
-function SearchReportView() {
+function SearchReportView({
+  onSelectAirport,
+  onReportWaitTime,
+}: {
+  onSelectAirport: (code: string) => void
+  onReportWaitTime: (airportCode: string, checkpoint?: string) => void
+}) {
   const [airport, setAirport] = useState<Airport>(DEFAULT_AIRPORT)
-  // undefined = closed, null = picker mode (traveler picks the checkpoint),
-  // string = fixed checkpoint from a card.
-  const [reportTarget, setReportTarget] = useState<string | null | undefined>(undefined)
   const { waitTimes, state, waking, lastUpdated, live, refresh } = useWaitTimes(airport.code)
   const online = useOnlineStatus()
   const { forecasts, loading: forecastsLoading } = useForecasts(airport.code, lastUpdated)
@@ -101,6 +215,14 @@ function SearchReportView() {
     [forecasts],
   )
 
+  const handleSelectAirport = useCallback(
+    (a: Airport) => {
+      setAirport(a)
+      onSelectAirport(a.code)
+    },
+    [onSelectAirport],
+  )
+
   return (
     <>
       <section className="pt-8">
@@ -111,7 +233,10 @@ function SearchReportView() {
             Crowdsourced checkpoint waits at your airport, updated by travelers in real time.
           </p>
           <div className="mt-5">
-            <AirportSearch selected={airport} onSelect={setAirport} />
+            <AirportSearch
+              selected={airport}
+              onSelect={handleSelectAirport}
+            />
           </div>
         </section>
 
@@ -147,7 +272,7 @@ function SearchReportView() {
               <button
                 type="button"
                 data-testid="report-button"
-                onClick={() => setReportTarget(null)}
+                onClick={() => onReportWaitTime(airport.code)}
                 className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center py-3 px-4 align-middle font-semibold text-brand-700 hover:underline focus:outline-none focus:ring-2 focus:ring-brand-500/40"
               >
                 Report a wait time
@@ -210,7 +335,7 @@ function SearchReportView() {
                 <CheckpointCard
                   key={waitTime.checkpoint.toLowerCase()}
                   waitTime={waitTime}
-                  onReport={setReportTarget}
+                  onReport={(checkpoint) => onReportWaitTime(airport.code, checkpoint)}
                   best={bestByCheckpoint.bestFor(waitTime.checkpoint)}
                   bestLoading={forecastsLoading}
                   consensus={consensusByCheckpoint.consensusFor(waitTime.checkpoint)}
@@ -226,7 +351,7 @@ function SearchReportView() {
                 <button
                   type="button"
                   data-testid="empty-report-button"
-                  onClick={() => setReportTarget(null)}
+                  onClick={() => onReportWaitTime(airport.code)}
                   className="mt-4 inline-flex h-10 items-center justify-center rounded-xl bg-brand-500 px-4 text-sm font-semibold text-white transition hover:bg-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
                 >
                   Report a wait time
@@ -235,14 +360,6 @@ function SearchReportView() {
             )}
           </div>
         </section>
-
-      <ReportSheet
-        open={reportTarget !== undefined}
-        airportCode={airport.code}
-        checkpoint={reportTarget ?? undefined}
-        onClose={() => setReportTarget(undefined)}
-        onReported={refresh}
-      />
     </>
   )
 }

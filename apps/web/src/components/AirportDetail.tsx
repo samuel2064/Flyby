@@ -9,13 +9,14 @@ interface AirportDetailProps {
   // for the staleness indicator (TIR-343).
   summary: AirportSummary
   onBack: () => void
+  onReportWaitTime: () => void
 }
 
 // Per-airport drill (TIR-317): Avg / Median / P90 strip plus busiest-hours and
 // day-of-week CSS bar charts. Bars are divs, not a chart lib, per the
 // WaitHistoryChart no-dependency convention; color is never the sole signal
 // (values are printed next to every bar).
-export function AirportDetail({ summary, onBack }: AirportDetailProps) {
+export function AirportDetail({ summary, onBack, onReportWaitTime }: AirportDetailProps) {
   const code = summary.airport
   const [stats, setStats] = useState<AirportStats | null>(null)
   const [error, setError] = useState(false)
@@ -45,13 +46,23 @@ export function AirportDetail({ summary, onBack }: AirportDetailProps) {
 
   return (
     <section className="pt-8" aria-labelledby="detail-heading">
-      <button
-        type="button"
-        onClick={onBack}
-        className="inline-flex min-h-11 items-center gap-1 text-sm font-semibold text-brand-700 hover:underline focus:outline-none focus:ring-2 focus:ring-brand-500/40"
-      >
-        ← All airports
-      </button>
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={onBack}
+          className="inline-flex min-h-11 items-center gap-1 text-sm font-semibold text-brand-700 hover:underline focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+        >
+          ← All airports
+        </button>
+        <button
+          type="button"
+          onClick={onReportWaitTime}
+          data-testid="detail-report-button"
+          className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center gap-2 rounded-xl bg-brand-500 px-3 py-2 text-sm font-semibold text-white transition hover:bg-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+        >
+          Report a wait time
+        </button>
+      </div>
 
       {error && (
         <div className="mt-6 rounded-2xl border border-slate-200 bg-white p-6 text-center shadow-sm">
