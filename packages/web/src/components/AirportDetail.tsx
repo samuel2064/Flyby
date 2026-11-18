@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useState } from 'react'
-import { getAirportWaitStats } from '../api/summary'
-import type { AirportStats, AirportSummary, StatsBucket } from '../api/summary'
+import { Link } from 'react-router-dom'
+import { getAirportWaitStats, getAirportCheckpoints } from '../api/summary'
+import type {
+  AirportStats,
+  AirportSummary,
+  StatsBucket,
+  AirportCheckpointView,
+} from '../api/summary'
 import { formatAge, formatAverage, isStale } from '../lib/dashboard'
 import { useRefreshInterval } from '../hooks/useRefreshInterval'
 import { useReportSheet } from '../contexts/ReportSheetContext'
@@ -19,14 +25,23 @@ interface AirportDetailProps {
 export function AirportDetail({ code, summary, onBack }: AirportDetailProps) {
   const { openReportSheet } = useReportSheet()
   const [stats, setStats] = useState<AirportStats | null>(null)
+  const [checkpoints, setCheckpoints] = useState<AirportCheckpointView[] | null>(null)
   const [error, setError] = useState(false)
 
   const load = useCallback(() => {
     setError(false)
     setStats(null)
+    setCheckpoints(null)
     getAirportWaitStats(code)
       .then((s) => setStats(s))
       .catch(() => setError(true))
+    // Checkpoint list is auxiliary navigation (links into /checkpoint/:id,
+    // the per-checkpoint drill/report surface). Failure hides the section
+    // instead of blocking the stats drill - same no-fabrication rule as the
+    // forecast chips.
+    getAirportCheckpoints(code)
+      .then((c) => setCheckpoints(c))
+      .catch(() => setCheckpoints(null))
   }, [code])
 
   useEffect(() => {
@@ -116,6 +131,34 @@ export function AirportDetail({ code, summary, onBack }: AirportDetailProps) {
             }))}
           />
         </>
+      )}
+
+      {checkpoints && checkpoints.length > 0 && (
+        <section aria-labelledby="checkpoints-heading" className="mt-8">
+          <h2 id="checkpoints-heading" className="text-lg font-semibold text-slate-900">
+            Checkpoints
+          </h2>
+          <ul className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2" data-testid="checkpoint-links">
+            {checkpoints.map((cp) => (
+              <li key={cp.id}>
+                <Link
+                  to={`/checkpoint/${cp.id}`}
+                  className="block rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition hover:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+                >
+                  <span className="block text-sm font-semibold text-slate-900">{cp.name}</span>
+                  {cp.terminal && (
+                    <span className="mt-0.5 block text-xs text-slate-500">Terminal {cp.terminal}</span>
+                  )}
+                  <span className="mt-1 block text-xs text-slate-500">
+                    {cp.latestWaitTimeMinutes === null
+                      ? 'No reports yet'
+                      : `Latest: ${formatAverage(cp.latestWaitTimeMinutes)}`}
+                  </span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </section>
       )}
     </section>
   )

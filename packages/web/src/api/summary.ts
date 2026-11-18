@@ -58,3 +58,28 @@ export function getWaitTimesSummary(): Promise<WaitTimesSummary> {
 export function getAirportWaitStats(code: string): Promise<AirportStats> {
   return apiFetch<AirportStats>(`/api/airports/${encodeURIComponent(code)}/wait-stats`)
 }
+
+// GET /api/checkpoints/airport/:code — per-checkpoint list with latest wait
+// data (native contract: {data: CheckpointView[]}). Feeds the checkpoint
+// drill-in links on the airport stats page so /checkpoint/:id (the report
+// surface) is reachable through normal navigation.
+export interface AirportCheckpointView {
+  id: string
+  airportCode: string
+  airportName: string
+  code: string
+  name: string
+  terminal: string | null
+  latestWaitTimeMinutes: number | null
+  latestReportedAt: string | null
+  source: string | null
+  reportType: string | null
+  accuracy: number
+  estimatedWaitTimeMinutes: number | null
+}
+
+export function getAirportCheckpoints(code: string): Promise<AirportCheckpointView[]> {
+  return apiFetch<{ data: AirportCheckpointView[] }>(
+    `/api/checkpoints/airport/${encodeURIComponent(code)}`
+  ).then((r) => r.data)
+}
