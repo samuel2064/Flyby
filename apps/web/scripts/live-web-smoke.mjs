@@ -110,27 +110,24 @@ async function attempt(n) {
       }
     }
 
-    // Zero unsupported-airport gap: ATL search yields a result and the empty
-    // state carries a working Report entry point (first report anywhere).
+    // Zero unsupported-airport gap: ATL search yields a result and the drill
+    // view it opens carries a working Report entry point (first report
+    // anywhere). TIR-405 Task 7 made the airport drill URL-based: picking a
+    // search result navigates to /airport/:code instead of staying in the
+    // search list, so the report entry point is the detail view's button.
     await page.fill('#airport-search', 'ATL')
     await page.click('text=Hartsfield-Jackson', { timeout: 30_000 })
-    await page.waitForSelector('[data-testid="empty-report-button"]', { timeout: 45_000, state: 'visible' })
-    console.log('  ATL: search result + empty-state report button present')
+    await page.waitForURL(/\/airports?\/ATL$/, { timeout: 45_000 })
+    await page.waitForSelector('[data-testid="detail-report-button"]', {
+      timeout: 45_000,
+      state: 'visible',
+    })
+    console.log('  ATL: search result -> /airport/ATL, detail report button present')
 
-    // TIR-326 companion: the empty state must list the real checkpoints so a
-    // traveler knows what to look for - the funnel affordance, not a dead end.
-    const knownNames = await page.locator('[data-testid="known-checkpoints"] li').allTextContents()
-    if (knownNames.length < 1) fail('ATL empty state lists no known checkpoints')
-    if (!knownNames.some((n) => n.includes('Domestic'))) {
-      fail(`ATL known-checkpoints list does not look like ATL data: ${JSON.stringify(knownNames.slice(0, 3))}`)
-    }
-    console.log(`  ATL: ${knownNames.length} known checkpoints listed`)
-
-    // Report sheet contract (zero writes): opening the sheet from the empty
-    // state must yield a picker populated with the airport's real checkpoints
-    // and a submit-affordance gated on them. Close without submitting - no
-    // report is ever written by this probe.
-    await page.click('[data-testid="empty-report-button"]')
+    // TIR-326 companion: the report sheet must offer the airport's real
+    // checkpoints so a traveler knows what to report on - the funnel
+    // affordance, not a dead end.
+    await page.click('[data-testid="detail-report-button"]')
     await page.waitForSelector('[data-testid="checkpoint-picker"]', { timeout: 15_000, state: 'visible' })
     const pickerOptions = await page.locator('[data-testid="checkpoint-picker"] option').allTextContents()
     if (pickerOptions.length < 1) fail('checkpoint picker opened with zero options')
@@ -140,6 +137,24 @@ async function attempt(n) {
     console.log(`  ATL picker: ${pickerOptions.length} options (write path usable, no report written)`)
     await page.locator('[aria-label="Close"]').click()
     await page.waitForSelector('[data-testid="checkpoint-picker"]', { state: 'detached', timeout: 15_000 })
+
+    // TIR-377 Task 7 acceptance: a shared airport link must open that
+    // airport, not the dashboard shell. The plural /airports/:code form is
+    // accepted alongside /airport/:code. This is a deployed-contract check:
+    // it only holds once the bundle that carries the route fix is live, so it
+    // runs on the scheduled smoke (REQUIRE_DEPLOYED_CONTRACT), not on pull
+    // requests that probe the currently deployed bundle.
+    if (REQUIRE_DEPLOYED_CONTRACT) {
+      await page.goto(`${BASE}/airports/JFK`, { waitUntil: 'networkidle', timeout: 120_000 })
+      await page.waitForSelector('#detail-heading', { timeout: 60_000, state: 'visible' })
+      const detailHeading = (await page.locator('#detail-heading').textContent()) ?? ''
+      if (!detailHeading.includes('JFK')) {
+        fail(`plural airport deep link rendered "${detailHeading}" instead of JFK`)
+      }
+      console.log('  deep link /airports/JFK renders the JFK detail view')
+      await page.goto(BASE, { waitUntil: 'networkidle', timeout: 120_000 })
+      await page.waitForSelector('#dashboard-filter', { state: 'visible', timeout: 60_000 })
+    }
 
     if (errors.length > 0) fail(`console errors: ${errors.join(' | ')}`)
 
