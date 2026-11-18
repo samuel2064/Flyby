@@ -164,10 +164,13 @@ async function attempt(n) {
     await openSearchTab(page)
     await page.waitForSelector('#airport-search', { timeout: 30_000 })
     if (REQUIRE_DEPLOYED_CONTRACT) {
-      await page.getByText('Could not load wait times for SEA.', { exact: false }).waitFor({
+      await page.getByText('You are offline.', { exact: false }).waitFor({
         state: 'visible',
         timeout: 30_000,
       })
+      if ((await page.getByText(/Waking up the service/i).count()) > 0) {
+        fail('offline state was represented as a cold start')
+      }
       if ((await page.getByText('Live', { exact: true }).count()) > 0) {
         fail('offline data was represented as live')
       }
