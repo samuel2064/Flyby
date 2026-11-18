@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { submitWaitTimeReport } from '../api/waitTimes'
 import { checkpointOptions } from '../data/airports'
 import { canSubmitReport, effectiveCheckpointPick } from '../lib/reportCheckpoint'
@@ -9,15 +9,12 @@ import { waitLevel } from '../api/types'
 interface ReportSheetProps {
   open: boolean
   airportCode: string
-  // Fixed checkpoint (card flow). Omit for picker mode: the traveler chooses
-  // from the airport's real checkpoints - the only way to file the FIRST
-  // report at an airport or for a terminal that has no card yet.
   checkpoint?: string
   onClose: () => void
   onReported: () => void
 }
 
-const WAIT_OPTIONS: number[] = [5, 10, 15, 20, 30, 45, 60]
+const WAIT_OPTIONS: number[] = [5, 10, 15, 20, 30, 45, 60, 90, 120]
 
 export function ReportSheet({
   open,
@@ -29,9 +26,14 @@ export function ReportSheet({
   const options = checkpointOptions(airportCode)
   const [pickedCheckpoint, setPickedCheckpoint] = useState<string>('')
   const [minutes, setMinutes] = useState<number>(15)
+  const [customMinutes, setCustomMinutes] = useState<string>('')
   const [submitting, setSubmitting] = useState(false)
   const [submitted, setSubmitted] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const prevFocus = useRef<HTMLElement | null>(null)
+  const dialogRef = useRef<HTMLDivElement>(null)
+
+  const activeMinutes = customMinutes !== '' ? Number(customMinutes) || minutes : minutes
 
   // The sheet stays mounted while open/close toggles, so a pick from a
   // previous airport must never leak into this one: fall back to the first
@@ -52,9 +54,35 @@ export function ReportSheet({
     return () => window.clearInterval(timer)
   }, [rateLimitUntil])
 
+  // Focus management: trap focus in dialog, restore on close.
+  useEffect(() => {
+    if (!open) return
+    prevFocus.current = document.activeElement as HTMLElement | null
+    const focusable = dialogRef.current?.querySelector<HTMLElement>(
+      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+    )
+    focusable?.focus?.()
+
+    const handleKeydown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', handleKeydown)
+    return () => {
+      window.removeEventListener('keydown', handleKeydown)
+      if (prevFocus.current) {
+        prevFocus.current.focus()
+        prevFocus.current = null
+      }
+    }
+  }, [open, onClose])
+
   const secondsLeft =
     rateLimitUntil === null ? 0 : Math.max(0, Math.ceil((rateLimitUntil - nowTick) / 1000))
   const rateLimited = rateLimitUntil !== null && secondsLeft > 0
+
+  const handleCustomChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    setCustomMinutes(e.target.value)
+  }, [])
 
   if (!open) return null
 
@@ -66,7 +94,7 @@ export function ReportSheet({
       await submitWaitTimeReport({
         airport: airportCode,
         checkpoint: activeCheckpoint,
-        waitMinutes: minutes,
+        waitMinutes: activeMinutes,
       })
       setSubmitted(true)
       onReported()
@@ -87,10 +115,11 @@ export function ReportSheet({
     }
   }
 
-  const level: WaitLevel = waitLevel(minutes)
+  const level: WaitLevel = waitLevel(activeMinutes)
 
   return (
     <div
+      ref={dialogRef}
       role="dialog"
       aria-modal="true"
       aria-labelledby="report-sheet-title"
@@ -166,17 +195,33 @@ export function ReportSheet({
                   <button
                     key={option}
                     type="button"
-                    onClick={() => setMinutes(option)}
-                    aria-pressed={minutes === option}
+                    onClick={() => {
+                      setMinutes(option)
+                      setCustomMinutes('')
+                    }}
+                    aria-pressed={minutes === option && customMinutes === ''}
                     className={`h-12 rounded-xl border text-sm font-semibold transition focus:outline-none focus:ring-2 focus:ring-brand-500/40 ${
-                      minutes === option
+                      minutes === option && customMinutes === ''
                         ? 'border-brand-500 bg-brand-500 text-white'
                         : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
                     }`}
                   >
-                    {option === 60 ? '60+' : option}
+                    {option}
                   </button>
                 ))}
+              </div>
+              <div className="mt-4">
+                <label className="block text-sm font-semibold text-slate-700 mb-1">
+                  Custom duration (minutes)
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  value={customMinutes}
+                  onChange={handleCustomChange}
+                  placeholder="e.g. 75"
+                  className="h-12 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+                />
               </div>
             </fieldset>
             <p className="mt-3 text-xs text-slate-500">
