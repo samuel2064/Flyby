@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { act, render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { TestBrowserRouter } from "./testRouter";
 import Home from "../src/pages/Home";
+import { ReportSheetProvider } from "../src/contexts/ReportSheetContext";
 
 let mockEventSource: any;
 let onlineHandler: Function | null = null;
@@ -241,12 +242,14 @@ describe("Home page", () => {
     }, { timeout: 3000 });
   });
 
-  it("opens report modal when Report time is clicked", async () => {
+  it("opens report sheet when Report time is clicked", async () => {
     mockFetch([createMockCheckpoint()]);
 
     render(
       <TestBrowserRouter>
-        <Home />
+        <ReportSheetProvider>
+          <Home />
+        </ReportSheetProvider>
       </TestBrowserRouter>
     );
 
@@ -260,7 +263,41 @@ describe("Home page", () => {
     const reportButton = screen.getByText("Report time");
     fireEvent.click(reportButton);
 
-    expect(screen.getByText("Report Wait Time")).toBeDefined();
+    expect(screen.getByText("Report wait time")).toBeDefined();
+  });
+
+  it("opens report sheet preselected to first matching airport when search is active", async () => {
+    mockFetch([
+      createMockCheckpoint({ airportCode: "JFK", airportName: "John F. Kennedy" }),
+      createMockCheckpoint({ id: "cp-2", airportCode: "LGA", airportName: "LaGuardia", name: "Terminal B Checkpoint", terminal: "B" }),
+    ]);
+
+    render(
+      <TestBrowserRouter>
+        <ReportSheetProvider>
+          <Home />
+        </ReportSheetProvider>
+      </TestBrowserRouter>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("airport-header-JFK")).toBeDefined();
+    }, { timeout: 3000 });
+
+    const searchInput = screen.getByTestId("home-search");
+    fireEvent.change(searchInput, { target: { value: "LGA" } });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("airport-header-LGA")).toBeDefined();
+    });
+
+    const reportButton = screen.getByText("Report a wait time");
+    fireEvent.click(reportButton);
+
+    // ReportSheet displays "{airportCode} · {checkpoint}" subtitle
+    await waitFor(() => {
+      expect(screen.getByText(/LGA ·/)).toBeDefined();
+    }, { timeout: 3000 });
   });
 
   it("displays dash for null wait time", async () => {

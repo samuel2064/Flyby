@@ -6,7 +6,6 @@ import { apiUrl } from '../lib/apiUrl';
 import { useSse } from '../hooks/useSse';
 import { useRefreshInterval } from '../hooks/useRefreshInterval';
 import { SkeletonCard } from '../components/Skeleton';
-import ReportModal from '../components/ReportModal';
 import { laneLabel, laneBadgeClass } from '../lib/lane';
 import { useReportSheet } from '../contexts/ReportSheetContext';
 import { DEFAULT_AIRPORT } from '../data/airports';
@@ -73,9 +72,8 @@ function groupByAirport(checkpoints: Checkpoint[]): AirportGroup[] {
 }
 
 export default function Home() {
-  const [reporting, setReporting] = useState<string | null>(null);
-  const { openReportSheet } = useReportSheet();
-  const [search, setSearch] = useState('');
+  const { openReportSheet } = useReportSheet()
+  const [search, setSearch] = useState('')
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const { isOnline, pendingCount, syncQueue } = useOfflineQueue();
   const { data, loading, error, isRevalidating, refetch } = useApi<Checkpoint[]>('/api/checkpoints', []);
@@ -85,10 +83,6 @@ export default function Home() {
   useRefreshInterval(() => {
     refetch();
   }, 30_000);
-
-  const fetchData = useCallback(() => {
-    refetch();
-  }, [refetch]);
 
   // Submit a queued report to the API
   const submitReport = useCallback(async ({ checkpointId, minutes, source, reportType, reportedAt }: { checkpointId: string; minutes: number; source: string; reportType?: string; reportedAt: string }): Promise<boolean> => {
@@ -172,8 +166,12 @@ export default function Home() {
         <div>
           <h2 className="text-2xl font-bold">Live Wait Times</h2>
           <button
-            onClick={() => openReportSheet(DEFAULT_AIRPORT.code)}
-            className="mt-2 text-sm bg-brand text-white px-3 py-1 rounded hover:bg-brandDark transition"
+            onClick={() => {
+              const code = filtered.length > 0 ? filtered[0].code : DEFAULT_AIRPORT.code
+              openReportSheet(code)
+            }}
+            aria-label="Report a wait time"
+            className="mt-2 inline-flex items-center justify-center gap-2 rounded-xl bg-brand-600 text-white px-4 py-2 text-sm font-semibold min-h-11 hover:bg-brand-700 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
           >
             Report a wait time
           </button>
@@ -283,7 +281,7 @@ export default function Home() {
                       </div>
                       <div className="flex items-center justify-between mt-3">
                         <Link to={`/airports/${cp.airportCode.toLowerCase()}`} className="text-sm text-brandDark hover:underline">View airport →</Link>
-                        <button onClick={() => setReporting(cp.id)} className="text-sm bg-brand text-white px-3 py-1 rounded hover:bg-brandDark transition">Report time</button>
+                        <button onClick={() => openReportSheet(cp.airportCode)} className="min-h-11 px-3 py-2 text-sm bg-brand text-white rounded hover:bg-brandDark transition">Report time</button>
                       </div>
                     </div>
                   ))}
@@ -293,14 +291,6 @@ export default function Home() {
           );
         })}
       </div>
-      {reporting && (
-        <ReportModal
-          checkpointId={reporting}
-          checkpointName={checkpoints.find((c) => c.id === reporting)?.name || ''}
-          onClose={() => setReporting(null)}
-          onReported={fetchData}
-        />
-      )}
     </div>
   );
 }
