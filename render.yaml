@@ -24,11 +24,12 @@ services:
     runtime: static
     branch: main
     rootDir: apps/web
-    # TIR-387 Control 2 ("Wait for CI"): only auto-deploy once the commit's
-    # GitHub checks pass. Declarative equivalent of the Render dashboard
-    # Settings -> "Wait for CI" toggle. `autoDeployTrigger` supersedes the
-    # deprecated `autoDeploy`.
-    autoDeployTrigger: checksPass
+    # TIR-409: deploy on every push to this branch. Render's "Wait for CI"
+    # trigger (`checksPass`) never matched this repo's CI check names, so
+    # pushes were silently not deployed. CI still gates merges (checks run on
+    # pull requests), so the commit trigger does not weaken the release gate.
+    # `autoDeployTrigger` supersedes the deprecated `autoDeploy`.
+    autoDeployTrigger: commit
     buildCommand: npm ci && npm run build
     staticPublishPath: dist
     envVars:
@@ -46,8 +47,8 @@ services:
     region: oregon
     branch: main
     rootDir: apps/api
-    # TIR-387 Control 2 ("Wait for CI"): see flyby-web above.
-    autoDeployTrigger: checksPass
+    # TIR-409: see flyby-web above.
+    autoDeployTrigger: commit
     buildCommand: npm ci --omit=dev && npx prisma generate
     startCommand: npx prisma migrate deploy && npm start
     healthCheckPath: /api/health
@@ -56,6 +57,10 @@ services:
         value: production
       - key: PORT
         value: 10000
+      - key: CORS_ORIGINS
+        value: https://flyby-web.onrender.com
+      - key: VAPID_PUBLIC_KEY
+        sync: false
       - key: DATABASE_URL
         fromDatabase:
           name: flyby-db

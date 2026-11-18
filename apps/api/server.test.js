@@ -83,6 +83,63 @@ test('health endpoint still responds ok (boot sanity)', async () => {
   assert.equal(body.status, 'ok');
 });
 
+test('CORS allows only the configured production web origin', async () => {
+  await ready;
+  const allowed = await fetch(`${BASE}/api/health`, {
+    headers: { Origin: 'https://flyby-web.onrender.com' },
+  });
+  assert.equal(allowed.status, 200);
+  assert.equal(allowed.headers.get('access-control-allow-origin'), 'https://flyby-web.onrender.com');
+
+  const disallowed = await fetch(`${BASE}/api/health`, {
+    headers: { Origin: 'https://attacker.example' },
+  });
+  assert.equal(disallowed.status, 200);
+  assert.equal(disallowed.headers.get('access-control-allow-origin'), null);
+});
+
+test('CORS preflight rejects unconfigured origins', async () => {
+  await ready;
+  const allowed = await fetch(`${BASE}/api/wait-times`, {
+    method: 'OPTIONS',
+    headers: {
+      Origin: 'https://flyby-web.onrender.com',
+      'Access-Control-Request-Method': 'POST',
+    },
+  });
+  assert.equal(allowed.status, 204);
+  assert.equal(allowed.headers.get('access-control-allow-origin'), 'https://flyby-web.onrender.com');
+
+  const disallowed = await fetch(`${BASE}/api/wait-times`, {
+    method: 'OPTIONS',
+    headers: {
+      Origin: 'https://attacker.example',
+      'Access-Control-Request-Method': 'POST',
+    },
+  });
+  assert.equal(disallowed.status, 403);
+  assert.equal(disallowed.headers.get('access-control-allow-origin'), null);
+});
+
+test('VAPID public key is environment-only and fails closed when unset', async () => {
+  await ready;
+  delete process.env.VAPID_PUBLIC_KEY;
+  const missing = await fetch(`${BASE}/api/vapid-public-key`);
+  assert.equal(missing.status, 503);
+  assert.deepEqual(await missing.json(), {
+    error: 'Push notifications not configured: VAPID_PUBLIC_KEY is not set',
+  });
+
+  process.env.VAPID_PUBLIC_KEY = 'configured-public-key';
+  try {
+    const configured = await fetch(`${BASE}/api/vapid-public-key`);
+    assert.equal(configured.status, 200);
+    assert.deepEqual(await configured.json(), { publicKey: 'configured-public-key' });
+  } finally {
+    delete process.env.VAPID_PUBLIC_KEY;
+  }
+});
+
 // --- TIR-299: authenticated DELETE /api/reports/:id ---------------------------
 // In-memory mode (no DB): reports are never persisted, so an authenticated
 // delete of a well-formed id answers 404 "Report not found" - distinct from the

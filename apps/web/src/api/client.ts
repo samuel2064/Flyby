@@ -18,14 +18,33 @@ export class ApiError extends Error {
   }
 }
 
+// Thrown when the fetch itself fails at the network level (rejected promise,
+// timeout, abort) - as opposed to an HTTP 4xx/5xx application response which
+// surfaces as ApiError. Network errors are the signal that the Render API
+// instance may be sleeping (cold start).
+export class NetworkError extends Error {
+  readonly cause: unknown
+
+  constructor(message: string, cause?: unknown) {
+    super(message)
+    this.name = 'NetworkError'
+    this.cause = cause
+  }
+}
+
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    ...init,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(init?.headers ?? {}),
-    },
-  })
+  let response: Response
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, {
+      ...init,
+      headers: {
+        'Content-Type': 'application/json',
+        ...(init?.headers ?? {}),
+      },
+    })
+  } catch (err) {
+    throw new NetworkError('Network request failed', err)
+  }
   if (!response.ok) {
     let body: unknown = null
     try {
