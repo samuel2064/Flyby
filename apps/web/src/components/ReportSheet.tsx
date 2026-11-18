@@ -2,6 +2,12 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { submitWaitTimeReport } from '../api/waitTimes'
 import { checkpointOptions } from '../data/airports'
 import { canSubmitReport, effectiveCheckpointPick } from '../lib/reportCheckpoint'
+import {
+  MAX_CUSTOM_MINUTES,
+  MIN_CUSTOM_MINUTES,
+  resolveCustomMinutes,
+  submittedMinutes,
+} from '../lib/reportMinutes'
 import { extractRateLimitSeconds, formatWaitMessage } from '../lib/rateLimitFeedback'
 import type { WaitLevel } from '../api/types'
 import { waitLevel } from '../api/types'
@@ -16,6 +22,9 @@ interface ReportSheetProps {
 
 const WAIT_OPTIONS: number[] = [5, 10, 15, 20, 30, 45, 60, 90, 120]
 
+const FOCUSABLE_SELECTOR =
+  'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+
 export function ReportSheet({
   open,
   airportCode,
@@ -27,13 +36,16 @@ export function ReportSheet({
   const [pickedCheckpoint, setPickedCheckpoint] = useState<string>('')
   const [minutes, setMinutes] = useState<number>(15)
   const [customMinutes, setCustomMinutes] = useState<string>('')
+  const [customError, setCustomError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [submitted, setSubmitted] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const prevFocus = useRef<HTMLElement | null>(null)
   const dialogRef = useRef<HTMLDivElement>(null)
 
-  const activeMinutes = customMinutes !== '' ? Number(customMinutes) || minutes : minutes
+  // The submitted value is always inside the supported range: a typed value
+  // outside it is clamped, and an empty field falls back to the preset.
+  const activeMinutes = submittedMinutes(customMinutes, minutes)
 
   // The sheet stays mounted while open/close toggles, so a pick from a
   // previous airport must never leak into this one: fall back to the first
@@ -54,18 +66,43 @@ export function ReportSheet({
     return () => window.clearInterval(timer)
   }, [rateLimitUntil])
 
-  // Focus management: trap focus in dialog, restore on close.
+  // Focus management: trap focus inside the dialog, restore it on close.
+  // Escape must work wherever focus currently sits, so the keydown handler
+  // runs on the window and wraps Tab around the dialog's own focusables
+  // instead of letting focus escape to the background controls.
   useEffect(() => {
     if (!open) return
     prevFocus.current = document.activeElement as HTMLElement | null
-    const focusable = dialogRef.current?.querySelector<HTMLElement>(
-      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
-    )
+    const focusable = dialogRef.current?.querySelector<HTMLElement>(FOCUSABLE_SELECTOR)
     focusable?.focus?.()
 
     const handleKeydown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
+      if (e.key === 'Escape') {
+        onClose()
+        return
+      }
+      if (e.key !== 'Tab' || !dialogRef.current) return
+
+      const focusables = Array.from(
+        dialogRef.current.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR),
+      ).filter((el) => el.tabIndex !== -1)
+      if (focusables.length === 0) return
+
+      const current = document.activeElement as HTMLElement | null
+      const index = current ? focusables.indexOf(current) : -1
+      if (index === -1) {
+        e.preventDefault()
+        focusables[0]?.focus()
+        return
+      }
+
+      const nextIndex = e.shiftKey
+        ? (index - 1 + focusables.length) % focusables.length
+        : (index + 1) % focusables.length
+      e.preventDefault()
+      focusables[nextIndex]?.focus()
     }
+
     window.addEventListener('keydown', handleKeydown)
     return () => {
       window.removeEventListener('keydown', handleKeydown)
@@ -81,7 +118,10 @@ export function ReportSheet({
   const rateLimited = rateLimitUntil !== null && secondsLeft > 0
 
   const handleCustomChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    setCustomMinutes(e.target.value)
+    const result = resolveCustomMinutes(e.target.value)
+    setCustomMinutes(result.value)
+    setCustomError(result.error)
+    if (result.minutes !== null) setMinutes(result.minutes)
   }, [])
 
   if (!open) return null
@@ -123,7 +163,7 @@ export function ReportSheet({
       role="dialog"
       aria-modal="true"
       aria-labelledby="report-sheet-title"
-      className="fixed inset-0 z-30 flex items-end justify-center sm:items-center"
+      className="fixed inset-0 z-40 flex items-end justify-center sm:items-center"
     >
       <button
         type="button"
@@ -198,6 +238,7 @@ export function ReportSheet({
                     onClick={() => {
                       setMinutes(option)
                       setCustomMinutes('')
+                      setCustomError(null)
                     }}
                     aria-pressed={minutes === option && customMinutes === ''}
                     className={`h-12 rounded-xl border text-sm font-semibold transition focus:outline-none focus:ring-2 focus:ring-brand-500/40 ${
@@ -211,17 +252,30 @@ export function ReportSheet({
                 ))}
               </div>
               <div className="mt-4">
-                <label className="block text-sm font-semibold text-slate-700 mb-1">
+                <label htmlFor="custom-minutes" className="block text-sm font-semibold text-slate-700 mb-1">
                   Custom duration (minutes)
                 </label>
                 <input
+                  id="custom-minutes"
                   type="number"
-                  min="1"
+                  min={MIN_CUSTOM_MINUTES}
+                  max={MAX_CUSTOM_MINUTES}
+                  aria-invalid={customError !== null ? true : undefined}
+                  aria-errormessage={customError ? 'custom-minutes-error' : undefined}
                   value={customMinutes}
                   onChange={handleCustomChange}
                   placeholder="e.g. 75"
                   className="h-12 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
                 />
+                {customError && (
+                  <p
+                    id="custom-minutes-error"
+                    role="alert"
+                    className="mt-1 rounded-xl bg-red-50 p-2 text-xs text-red-900"
+                  >
+                    {customError}
+                  </p>
+                )}
               </div>
             </fieldset>
             <p className="mt-3 text-xs text-slate-500">
