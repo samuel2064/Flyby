@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import {
+  confidenceFor,
   filterAirports,
   formatAge,
   formatAverage,
   formatMinutes,
+  freshnessLabel,
   isStale,
+  isTinySample,
   newestReportedAt,
   severityFor,
   sortBySeverity,
@@ -148,5 +151,62 @@ describe('staleness (TIR-343)', () => {
         summary({ latestReportedAt: 'not-a-date' }),
       ]),
     ).toBe(null)
+  })
+})
+
+describe('confidenceFor', () => {
+  it('returns none for zero samples', () => {
+    expect(confidenceFor(0)).toBe('none')
+  })
+  it('returns low for 1-2 samples', () => {
+    expect(confidenceFor(1)).toBe('low')
+    expect(confidenceFor(2)).toBe('low')
+  })
+  it('returns medium for 3-9 samples', () => {
+    expect(confidenceFor(3)).toBe('medium')
+    expect(confidenceFor(9)).toBe('medium')
+  })
+  it('returns high for 10+ samples', () => {
+    expect(confidenceFor(10)).toBe('high')
+    expect(confidenceFor(100)).toBe('high')
+  })
+})
+
+describe('isTinySample', () => {
+  it('returns false for zero samples', () => {
+    expect(isTinySample(0)).toBe(false)
+  })
+  it('returns true for 1-2 samples', () => {
+    expect(isTinySample(1)).toBe(true)
+    expect(isTinySample(2)).toBe(true)
+  })
+  it('returns false for 3+ samples', () => {
+    expect(isTinySample(3)).toBe(false)
+    expect(isTinySample(10)).toBe(false)
+  })
+})
+
+describe('freshnessLabel', () => {
+  const now = Date.now()
+
+  it('returns unavailable when no samples', () => {
+    expect(freshnessLabel(null, null, 0, null)).toBe('unavailable')
+  })
+
+  it('returns historical when stale', () => {
+    const staleDate = new Date(now - 4 * 60 * 60 * 1000).toISOString() // 4h ago
+    expect(freshnessLabel(12, staleDate, 5, null)).toBe('historical')
+  })
+
+  it('returns recent when fresh with minutes', () => {
+    const recentDate = new Date(now - 60 * 60 * 1000).toISOString() // 1h ago
+    expect(freshnessLabel(12, recentDate, 5, null)).toBe('recent')
+  })
+
+  it('returns estimate when trend data exists but no minutes', () => {
+    const recentDate = new Date(now - 60 * 60 * 1000).toISOString() // 1h ago
+    expect(
+      freshnessLabel(null, recentDate, 5, { currentSampleSize: 5, previousSampleSize: 3 }),
+    ).toBe('estimate')
   })
 })

@@ -5,6 +5,10 @@ import type { AirportSummary } from '../api/summary'
 
 export type Severity = 'short' | 'moderate' | 'long' | 'very-long' | 'no-data'
 
+export type Confidence = 'high' | 'medium' | 'low' | 'none'
+
+export type Freshness = 'recent' | 'estimate' | 'historical' | 'unavailable'
+
 export interface SeveritySpec {
   label: string
   // Tailwind classes: color is never the sole indicator - the label text is
@@ -39,6 +43,42 @@ export const SEVERITY_SPECS: Record<Severity, SeveritySpec> = {
     chipClass: 'bg-slate-100 text-slate-500',
     badgeClass: 'bg-slate-300',
   },
+}
+
+// Confidence thresholds (TIR-399): never present one report as an
+// airport-wide measurement; tiny samples are suppressed or flagged.
+export const CONFIDENCE_THRESHOLDS: Record<Confidence, { min: number; max: number }> = {
+  high: { min: 10, max: Infinity },
+  medium: { min: 3, max: 9 },
+  low: { min: 1, max: 2 },
+  none: { min: 0, max: 0 },
+}
+
+// Samples below this are considered too small to trust as airport-wide.
+export const SUPPRESS_TINY_SAMPLES_THRESHOLD = 3
+
+export function confidenceFor(sampleSize: number): Confidence {
+  if (sampleSize >= 10) return 'high'
+  if (sampleSize >= 3) return 'medium'
+  if (sampleSize >= 1) return 'low'
+  return 'none'
+}
+
+export function isTinySample(sampleSize: number): boolean {
+  return sampleSize > 0 && sampleSize < SUPPRESS_TINY_SAMPLES_THRESHOLD
+}
+
+export function freshnessLabel(
+  minutes: number | null,
+  reportedAt: string | null,
+  sampleSize: number,
+  trend: { currentSampleSize: number; previousSampleSize: number } | null,
+): Freshness {
+  if (sampleSize === 0) return 'unavailable'
+  if (isStale(reportedAt)) return 'historical'
+  if (minutes !== null) return 'recent'
+  if (trend && (trend.currentSampleSize > 0 || trend.previousSampleSize > 0)) return 'estimate'
+  return 'unavailable'
 }
 
 export function severityFor(minutes: number | null): Severity {

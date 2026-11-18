@@ -8,14 +8,40 @@ import {
   filterAirports,
   formatAge,
   formatMinutes,
+  confidenceFor,
+  freshnessLabel,
   isStale,
+  isTinySample,
   newestReportedAt,
   severityFor,
   sortBySeverity,
   SEVERITY_SPECS,
+  type Confidence,
+  type Freshness,
 } from '../lib/dashboard'
 
 const AUTO_REFRESH_MS = 60_000
+
+const CONFIDENCE_LABELS: Record<Confidence, string> = {
+  high: 'High confidence',
+  medium: 'Medium confidence',
+  low: 'Low confidence',
+  none: 'No confidence',
+}
+
+const FRESHNESS_LABELS: Record<Freshness, string> = {
+  recent: 'Recent crowd report',
+  estimate: 'Estimate',
+  historical: 'Historical',
+  unavailable: 'Unavailable',
+}
+
+const CONFIDENCE_DOT_CLASSES: Record<Confidence, string> = {
+  high: 'bg-emerald-500',
+  medium: 'bg-amber-500',
+  low: 'bg-orange-500',
+  none: 'bg-slate-400',
+}
 
 type FetchState = 'loading' | 'waking' | 'offline' | 'ready' | 'error'
 
@@ -168,12 +194,22 @@ export function Dashboard({ onSelectAirport, onReportWaitTime }: DashboardProps)
       )}
 
       {state === 'ready' && (
-        <ul className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2" data-testid="dashboard-list">
+        <>
+          <ul className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2" data-testid="dashboard-list">
           {visible.map((a) => {
             const severity = severityFor(a.latestWaitMinutes)
             const spec = SEVERITY_SPECS[severity]
             const stale = isStale(a.latestReportedAt)
             const age = formatAge(a.latestReportedAt)
+            const confidence = confidenceFor(a.sampleSize)
+            const freshness = freshnessLabel(
+              a.latestWaitMinutes,
+              a.latestReportedAt,
+              a.sampleSize,
+              a.trend,
+            )
+            const tiny = isTinySample(a.sampleSize)
+
             return (
               <li key={a.airport}>
                 <button
@@ -201,6 +237,21 @@ export function Dashboard({ onSelectAirport, onReportWaitTime }: DashboardProps)
                       )}
                     </div>
                     <p className="mt-0.5 truncate text-xs text-slate-500">{a.airportName}</p>
+                    {tiny && (
+                      <p className="mt-1 text-[10px] font-semibold text-orange-600">
+                        ⚠ Only {a.sampleSize} report{a.sampleSize === 1 ? '' : 's'} — not airport-wide
+                      </p>
+                    )}
+                    <div className="mt-1 flex items-center gap-2 text-[10px]">
+                      <span
+                        className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 ${CONFIDENCE_DOT_CLASSES[confidence]}`}
+                      >
+                        <span aria-hidden="true" className="h-1 w-1 rounded-full" />
+                        {CONFIDENCE_LABELS[confidence]}
+                      </span>
+                      <span className="text-slate-400">·</span>
+                      <span className="text-slate-500">{FRESHNESS_LABELS[freshness]}</span>
+                    </div>
                   </div>
                   <div className="shrink-0 text-right">
                     <p className={`text-lg font-bold ${stale ? 'text-slate-400' : 'text-slate-900'}`}>
@@ -234,6 +285,11 @@ export function Dashboard({ onSelectAirport, onReportWaitTime }: DashboardProps)
             </li>
           )}
         </ul>
+        <p className="mt-4 text-[10px] text-slate-500 text-center">
+          Crowdsourced wait times from travelers — not an official airport guarantee. Always check
+          posted signage and allow extra time.
+        </p>
+        </>
       )}
     </section>
   )
