@@ -7,7 +7,14 @@ import type {
   StatsBucket,
   AirportCheckpointView,
 } from '../api/summary'
-import { formatAge, formatAverage, isStale } from '../lib/dashboard'
+import {
+  formatAge,
+  formatAverage,
+  formatMinutes,
+  isStale,
+  severityFor,
+  SEVERITY_SPECS,
+} from '../lib/dashboard'
 import { useRefreshInterval } from '../hooks/useRefreshInterval'
 import { useReportSheet } from '../contexts/ReportSheetContext'
 
@@ -139,24 +146,73 @@ export function AirportDetail({ code, summary, onBack }: AirportDetailProps) {
             Checkpoints
           </h2>
           <ul className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2" data-testid="checkpoint-links">
-            {checkpoints.map((cp) => (
-              <li key={cp.id}>
-                <Link
-                  to={`/checkpoint/${cp.id}`}
-                  className="block rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition hover:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
-                >
-                  <span className="block text-sm font-semibold text-slate-900">{cp.name}</span>
-                  {cp.terminal && (
-                    <span className="mt-0.5 block text-xs text-slate-500">Terminal {cp.terminal}</span>
-                  )}
-                  <span className="mt-1 block text-xs text-slate-500">
-                    {cp.latestWaitTimeMinutes === null
-                      ? 'No reports yet'
-                      : `Latest: ${formatAverage(cp.latestWaitTimeMinutes)}`}
-                  </span>
-                </Link>
-              </li>
-            ))}
+            {checkpoints.map((cp) => {
+              // TIR-465 display conventions (mirrors the PublicDashboard cards):
+              // latest waits are crowd REPORTS, so they render as whole minutes
+              // (formatMinutes, not formatAverage); the severity chip carries the
+              // shared wait-color thresholds (color + text label, never color
+              // alone); stale readings are de-emphasized with an age line.
+              const hasData = cp.latestWaitTimeMinutes !== null
+              const severity = severityFor(cp.latestWaitTimeMinutes)
+              const spec = SEVERITY_SPECS[severity]
+              const stale = isStale(cp.latestReportedAt)
+              const age = formatAge(cp.latestReportedAt)
+              return (
+                <li key={cp.id}>
+                  <Link
+                    to={`/checkpoint/${cp.id}`}
+                    aria-label={`${cp.name}: ${
+                      hasData
+                        ? `${spec.label}, latest wait ${formatMinutes(cp.latestWaitTimeMinutes)} reported ${age}${stale ? ' (stale)' : ''}`
+                        : 'no reports yet'
+                    }. Open checkpoint.`}
+                    className="block rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition hover:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+                  >
+                    <span className="flex flex-wrap items-center gap-2">
+                      <span className="text-sm font-semibold text-slate-900">{cp.name}</span>
+                      {hasData && (
+                        <span
+                          data-testid={`checkpoint-severity-${severity}`}
+                          className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-semibold ${spec.chipClass}`}
+                        >
+                          <span aria-hidden="true" className={`h-2 w-2 rounded-full ${spec.badgeClass}`} />
+                          {spec.label}
+                        </span>
+                      )}
+                      {hasData && stale && (
+                        <span
+                          data-testid="checkpoint-stale-badge"
+                          className="inline-flex items-center rounded-full border border-slate-300 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-500"
+                        >
+                          Stale
+                        </span>
+                      )}
+                    </span>
+                    {cp.terminal && (
+                      <span className="mt-0.5 block text-xs text-slate-500">Terminal {cp.terminal}</span>
+                    )}
+                    {hasData ? (
+                      <span
+                        data-testid={`checkpoint-latest-${cp.id}`}
+                        className="mt-1 block text-xs text-slate-500"
+                      >
+                        Latest:{' '}
+                        <span
+                          className={`${
+                            stale ? 'font-medium text-slate-500' : 'font-semibold text-slate-900'
+                          }`}
+                        >
+                          {formatMinutes(cp.latestWaitTimeMinutes)}
+                        </span>
+                        {cp.latestReportedAt ? ` · reported ${age}` : ''}
+                      </span>
+                    ) : (
+                      <span className="mt-1 block text-xs text-slate-500">No reports yet</span>
+                    )}
+                  </Link>
+                </li>
+              )
+            })}
           </ul>
         </section>
       )}
