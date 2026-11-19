@@ -20,9 +20,9 @@ const apiAnyPattern = apiBase
   : /\/api\/.*/
 
 export default defineConfig({
-  css: {
-    transformer: 'esbuild',
-  },
+  // TIR-469: no `css.transformer` override - the default PostCSS pipeline must
+  // run (see postcss.config.js) so Tailwind directives compile into utilities.
+  // `build.cssMinify: 'esbuild'` below is unaffected.
   plugins: [
     react(),
     VitePWA({
