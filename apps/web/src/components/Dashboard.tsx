@@ -4,6 +4,7 @@ import { fetchWithColdStartRetry } from '../lib/coldStart'
 import { phaseAfterNetworkFailure } from '../lib/connectivity'
 import { useOnlineStatus } from '../hooks/useOnlineStatus'
 import type { AirportSummary } from '../api/summary'
+import { SkeletonCard } from './SkeletonCard'
 import {
   filterAirports,
   formatAge,
@@ -128,11 +129,11 @@ export function Dashboard({ onSelectAirport, onReportWaitTime }: DashboardProps)
         </button>
       </div>
 
-      <p aria-live="polite" className="text-xs text-slate-500">
+      <p aria-live="polite" role="status" className="text-xs text-slate-500">
         {state === 'ready'
           ? `Updated ${formatAge(newest)} · refreshes every 60s`
           : state === 'waking'
-            ? 'Waking up the service…'
+            ? 'Waking up the service — this can take a few seconds on first load.'
             : state === 'offline'
               ? 'You are offline'
               : state === 'loading'
@@ -156,13 +157,13 @@ export function Dashboard({ onSelectAirport, onReportWaitTime }: DashboardProps)
       </div>
 
       {(state === 'loading' || state === 'waking' || state === 'offline') && (
-        <p className="mt-6 text-sm text-slate-500">
-          {state === 'waking'
-            ? 'Waking up the service…'
-            : state === 'offline'
-              ? 'You are offline. Wait for a connection, then try again.'
-              : 'Loading airport wait times…'}
-        </p>
+        <ul className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2" data-testid="dashboard-list">
+          {[...Array(3)].map((_, i) => (
+            <li key={i}>
+              <SkeletonCard />
+            </li>
+          ))}
+        </ul>
       )}
       {state === 'offline' && (
         <button
