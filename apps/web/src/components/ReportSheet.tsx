@@ -12,6 +12,7 @@ interface ReportSheetProps {
   checkpoint?: string
   onClose: () => void
   onReported: () => void
+  loading?: boolean
 }
 
 const WAIT_OPTIONS: number[] = [5, 10, 15, 20, 30, 45, 60, 90, 120]
@@ -22,6 +23,7 @@ export function ReportSheet({
   checkpoint,
   onClose,
   onReported,
+  loading = false,
 }: ReportSheetProps) {
   const options = checkpointOptions(airportCode)
   const [pickedCheckpoint, setPickedCheckpoint] = useState<string>('')
@@ -170,20 +172,28 @@ export function ReportSheet({
             {!checkpoint && (
               <label className="mt-5 block">
                 <span className="text-sm font-semibold text-slate-700">Checkpoint</span>
-                <select
-                  data-testid="checkpoint-picker"
-                  value={effectivePick}
-                  onChange={(e) => setPickedCheckpoint(e.target.value)}
-                  disabled={options.length === 0}
-                  className="mt-2 h-12 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-brand-500/40 disabled:bg-slate-100"
-                >
-                  {options.length === 0 && <option value="">No checkpoints configured</option>}
-                  {options.map((name) => (
-                    <option key={name} value={name}>
-                      {name}
-                    </option>
-                  ))}
-                </select>
+                {loading ? (
+                  <p className="mt-2 text-xs text-slate-500">
+                    Loading checkpoints…
+                  </p>
+                ) : (
+                  <>
+                    <select
+                      data-testid="checkpoint-picker"
+                      value={effectivePick}
+                      onChange={(e) => setPickedCheckpoint(e.target.value)}
+                      disabled={options.length === 0 || loading}
+                      className="mt-2 h-12 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-brand-500/40 disabled:bg-slate-100"
+                    >
+                      {options.length === 0 && <option value="">No checkpoints configured</option>}
+                      {options.map((name) => (
+                        <option key={name} value={name}>
+                          {name}
+                        </option>
+                      ))}
+                    </select>
+                  </>
+                )}
               </label>
             )}
             <fieldset className="mt-5">

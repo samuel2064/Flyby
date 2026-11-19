@@ -84,7 +84,7 @@ export function AirportDetail({ summary, onBack, onReportWaitTime }: AirportDeta
             {isStale(summary.latestReportedAt) && summary.latestReportedAt && (
               <span
                 data-testid="stale-badge"
-                className="ml-2 inline-flex items-center rounded-full border border-slate-300 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-500"
+                className="ml-2 inline-flex items-center rounded-full border border-slate-300 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-600"
               >
                 Stale - treat as historical
               </span>

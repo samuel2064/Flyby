@@ -144,7 +144,7 @@ export default function App() {
                   }
                   setDetailAirport(null)
                 }}
-                className={`min-h-11 rounded-full px-3 text-xs font-semibold transition focus:outline-none focus:ring-2 focus:ring-white/40 sm:min-h-0 sm:px-4 ${
+                className={`min-h-11 rounded-full px-3 text-xs font-semibold transition focus:outline-none focus:ring-2 focus:ring-white/40 sm:px-4 ${
                   tab === value ? 'bg-white text-brand-900' : 'text-white/80 hover:text-white'
                 }`}
               >
@@ -300,7 +300,7 @@ function SearchReportView({
                 <button
                   type="button"
                   onClick={refresh}
-                  className="mt-4 inline-flex h-10 items-center justify-center rounded-xl border border-brand-500 bg-white px-4 text-sm font-semibold text-brand-700 transition hover:bg-brand-50 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+                  className="mt-4 inline-flex min-h-[44px] items-center justify-center rounded-xl border border-brand-500 bg-white px-4 text-sm font-semibold text-brand-700 transition hover:bg-brand-50 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
                 >
                   Try again
                 </button>
@@ -321,7 +321,7 @@ function SearchReportView({
                 <button
                   type="button"
                   onClick={refresh}
-                  className="mt-4 inline-flex h-10 items-center justify-center rounded-xl border border-brand-500 bg-white px-4 text-sm font-semibold text-brand-700 transition hover:bg-brand-50 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+                  className="mt-4 inline-flex min-h-[44px] items-center justify-center rounded-xl border border-brand-500 bg-white px-4 text-sm font-semibold text-brand-700 transition hover:bg-brand-50 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
                 >
                   Retry
                 </button>

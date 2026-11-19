@@ -209,14 +209,27 @@ export function Dashboard({ onSelectAirport, onReportWaitTime }: DashboardProps)
               a.trend,
             )
             const tiny = isTinySample(a.sampleSize)
+            const waitTextClass = stale || severity === 'no-data'
+              ? 'text-slate-500'
+              : severity === 'short' ? 'text-emerald-600'
+              : severity === 'moderate' ? 'text-amber-600'
+              : severity === 'long' ? 'text-orange-600'
+              : 'text-red-600'
 
             return (
               <li key={a.airport}>
-                <button
-                  type="button"
+                <div
                   onClick={() => onSelectAirport(a)}
+                  role="button"
+                  tabIndex={0}
                   aria-label={`${a.airport}: ${spec.label}, latest wait ${formatMinutes(a.latestWaitMinutes)} reported ${age}${stale && a.latestReportedAt ? ' (stale)' : ''}, ${a.sampleSize} reports. View details.`}
                   className="flex min-h-11 w-full items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:border-brand-500/50 hover:shadow focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault()
+                      onSelectAirport(a)
+                    }
+                  }}
                 >
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
@@ -230,7 +243,7 @@ export function Dashboard({ onSelectAirport, onReportWaitTime }: DashboardProps)
                       {stale && severity !== 'no-data' && (
                         <span
                           data-testid="stale-badge"
-                          className="inline-flex items-center rounded-full border border-slate-300 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-500"
+                          className="inline-flex items-center rounded-full border border-slate-300 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-600"
                         >
                           Stale
                         </span>
@@ -254,7 +267,7 @@ export function Dashboard({ onSelectAirport, onReportWaitTime }: DashboardProps)
                     </div>
                   </div>
                   <div className="shrink-0 text-right">
-                    <p className={`text-lg font-bold ${stale ? 'text-slate-400' : 'text-slate-900'}`}>
+                    <p className={`text-lg font-bold ${waitTextClass}`}>
                       {formatMinutes(a.latestWaitMinutes)}
                     </p>
                     <p className={`text-xs ${stale ? 'font-medium text-slate-500' : 'text-slate-500'}`}>
@@ -275,7 +288,7 @@ export function Dashboard({ onSelectAirport, onReportWaitTime }: DashboardProps)
                   >
                     Report
                   </button>
-                </button>
+                </div>
               </li>
             )
           })}
