@@ -36,7 +36,7 @@ export const SEVERITY_SPECS: Record<Severity, SeveritySpec> = {
   },
   'no-data': {
     label: 'No data',
-    chipClass: 'bg-slate-100 text-slate-500',
+    chipClass: 'bg-slate-100 text-slate-600',
     badgeClass: 'bg-slate-300',
   },
 }
