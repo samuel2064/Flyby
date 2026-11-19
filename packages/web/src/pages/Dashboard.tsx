@@ -69,7 +69,7 @@ export default function Dashboard() {
   const { isOnline, pendingCount } = useOfflineQueue()
   const { data, loading, error, refetch } = useApi<DashboardData>("/api/dashboard", []);
   const { openReportSheet, setReportedHandler } = useReportSheet()
-  const [selectedAirport, setSelectedAirport] = useState<string | null>(
+  const [selectedAirport] = useState<string | null>(
     () => localStorage.getItem(STORAGE_KEY)
   )
   const [search, setSearch] = useState('')
@@ -207,8 +207,7 @@ export default function Dashboard() {
               {filteredCheckpoints.map((cp) => (
                 <tr
                   key={cp.id}
-                  className={`border-t transition cursor-pointer ${cp.airportCode === selectedAirport ? 'bg-brand-50' : 'hover:bg-gray-50'}`}
-                  onClick={() => setSelectedAirport(cp.airportCode)}
+                  className={`border-t transition ${cp.airportCode === selectedAirport ? 'bg-brand-50' : 'hover:bg-gray-50'}`}
                 >
                   <td className="p-3 font-medium">{cp.airportCode}</td>
                   <td className="p-3">{cp.name}</td>
