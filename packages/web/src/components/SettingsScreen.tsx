@@ -81,7 +81,7 @@ export function SettingsScreen({
           <button
             type="button"
             onClick={onViewBillingHistory}
-            className="text-sm text-brand-600 underline hover:no-underline dark:text-brand-400"
+            className="text-sm text-brand-600 underline hover:no-underline dark:text-brand-500"
           >
             View billing history
           </button>
@@ -98,7 +98,7 @@ export function SettingsScreen({
           <button
             type="button"
             onClick={onNotificationPreferences}
-            className="text-sm text-brand-600 underline hover:no-underline dark:text-brand-400"
+            className="text-sm text-brand-600 underline hover:no-underline dark:text-brand-500"
           >
             Manage notification preferences
           </button>

@@ -14,12 +14,12 @@ interface PremiumComparisonProps {
 
 const TIER_HEADER_STYLES: Record<string, string> = {
   'true': 'text-gray-600 dark:text-gray-300',
-  'false': 'text-brand-600 dark:text-brand-400',
+  'false': 'text-brand-600 dark:text-brand-500',
 }
 
 const CHECKMARK_STYLES: Record<string, string> = {
   'true': 'text-gray-500 dark:text-gray-400',
-  'false': 'text-brand-600 dark:text-brand-400',
+  'false': 'text-brand-600 dark:text-brand-500',
 }
 
 export function PremiumComparison({
@@ -62,7 +62,7 @@ export function PremiumComparison({
               <button
                 type="button"
                 onClick={primaryCta.onClick}
-                className={`w-full bg-gradient-to-r from-brand-600 to-brand-700 text-white px-6 py-3 rounded-lg hover:opacity-90 transition-opacity ${isHighlighted ? 'shadow-md ring-2 ring-brand-400/50' : ''}`}
+                className={`w-full bg-gradient-to-r from-brand-600 to-brand-700 text-white px-6 py-3 rounded-lg hover:opacity-90 transition-opacity ${isHighlighted ? 'shadow-md ring-2 ring-brand-500/40' : ''}`}
               >
                 {primaryCta.label}
               </button>
