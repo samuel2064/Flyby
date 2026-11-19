@@ -10,6 +10,7 @@ import {
   sortBySeverity,
   SEVERITY_SPECS,
 } from '../lib/dashboard'
+import { SkeletonCard } from '../components/Skeleton'
 import { useRefreshInterval } from '../hooks/useRefreshInterval'
 
 const AUTO_REFRESH_MS = 60_000
@@ -67,11 +68,11 @@ export function PublicDashboard({ onSelectAirport }: PublicDashboardProps) {
             Latest crowdsourced security wait at every tracked airport, longest lines first.
           </p>
         </div>
-        <p aria-live="polite" className="text-xs text-slate-500">
+        <p aria-live="polite" role="status" className="text-xs text-slate-500">
           {state === 'ready' && lastUpdated
             ? `Updated ${lastUpdated.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} · refreshes every 60s`
             : state === 'loading'
-              ? 'Loading…'
+              ? 'Waking up the service — this can take a few seconds on first load.'
               : ''}
         </p>
       </div>
@@ -91,7 +92,13 @@ export function PublicDashboard({ onSelectAirport }: PublicDashboardProps) {
       </div>
 
       {state === 'loading' && (
-        <p className="mt-6 text-sm text-slate-500">Loading airport wait times…</p>
+        <ul className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2" data-testid="dashboard-list">
+          {[...Array(3)].map((_, i) => (
+            <li key={i}>
+              <SkeletonCard />
+            </li>
+          ))}
+        </ul>
       )}
       {state === 'error' && (
         <div className="mt-6 rounded-2xl border border-slate-200 bg-white p-6 text-center shadow-sm">
