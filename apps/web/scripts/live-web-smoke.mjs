@@ -63,6 +63,94 @@ async function verifyPwaAssets(page) {
   console.log('  PWA icons: 192px, 512px, maskable, and apple-touch are deployed')
 }
 
+async function verifyReportSheetLifecycle(page) {
+  const trigger = page.locator('[data-testid="detail-report-button"]')
+  await trigger.click()
+  const dialog = page.getByRole('dialog')
+  await dialog.waitFor({ state: 'visible', timeout: 15_000 })
+  const customMinutes = dialog.locator('#custom-minutes')
+  const min = await customMinutes.getAttribute('min')
+  const max = await customMinutes.getAttribute('max')
+  if (min !== '1' || max !== '120') {
+    fail(`report sheet custom minutes bounds are ${min}-${max}, expected 1-120`)
+  }
+
+  await customMinutes.fill('999')
+  if ((await customMinutes.inputValue()) !== '120') {
+    fail(`report sheet custom minutes did not clamp 999 to 120`)
+  }
+  if (!(await page.getByText('Maximum is 120 minutes.', { exact: true }).count())) {
+    fail('report sheet custom minutes did not show the maximum-range error')
+  }
+  await customMinutes.fill('75')
+
+  for (let i = 0; i < 20; i += 1) {
+    await page.keyboard.press('Tab')
+    const focusInside = await page.evaluate(() => {
+      const reportDialog = document.querySelector('[role="dialog"]')
+      return Boolean(reportDialog && reportDialog.contains(document.activeElement))
+    })
+    if (!focusInside) fail(`focus escaped the report dialog after ${i + 1} Tab presses`)
+  }
+
+  await page.keyboard.press('Escape')
+  await dialog.waitFor({ state: 'detached', timeout: 15_000 })
+  if (!(await trigger.evaluate((element) => document.activeElement === element))) {
+    fail('focus did not return to the report trigger after Escape')
+  }
+
+  await trigger.click()
+  await dialog.waitFor({ state: 'visible', timeout: 15_000 })
+  if ((await customMinutes.inputValue()) !== '') {
+    fail(`report sheet retained custom minutes "${await customMinutes.inputValue()}" after reopen`)
+  }
+  await page.keyboard.press('Escape')
+  await dialog.waitFor({ state: 'detached', timeout: 15_000 })
+
+  await page.evaluate(() => {
+    const event = new Event('beforeinstallprompt')
+    Object.defineProperty(event, 'prompt', { value: async () => {} })
+    Object.defineProperty(event, 'userChoice', { value: Promise.resolve({ outcome: 'dismissed' }) })
+    window.dispatchEvent(event)
+  })
+  await page.locator('[data-testid="install-prompt"]').waitFor({ state: 'visible', timeout: 15_000 })
+  await trigger.click()
+  await dialog.waitFor({ state: 'visible', timeout: 15_000 })
+  if (await page.locator('[data-testid="install-prompt"]').count()) {
+    fail('install prompt remained visible while the report dialog was open')
+  }
+
+  await page.route('**/api/wait-times/report', async (route) => {
+    const payload = JSON.parse(route.request().postData() || '{}')
+    await route.fulfill({
+      status: 201,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        id: 'live-web-smoke',
+        airport: payload.airport,
+        checkpoint: payload.checkpoint,
+        waitMinutes: payload.waitMinutes,
+        receivedAt: new Date().toISOString(),
+      }),
+    })
+  })
+  try {
+    await dialog.getByRole('button', { name: '10', exact: true }).click()
+    await dialog.getByRole('button', { name: 'Submit report', exact: true }).click()
+    await page.getByText('Thanks! Your report is live.', { exact: true }).waitFor({
+      state: 'visible',
+      timeout: 3_000,
+    })
+    if (await page.locator('[data-testid="install-prompt"]').count()) {
+      fail('install prompt preempted the report submission result')
+    }
+    await dialog.waitFor({ state: 'detached', timeout: 5_000 })
+  } finally {
+    await page.unroute('**/api/wait-times/report')
+  }
+  console.log('  report sheet: range clamp, focus trap, install isolation, form reset verified')
+}
+
 async function attempt(n) {
   const browser = await chromium.launch()
   const errors = []
@@ -137,6 +225,7 @@ async function attempt(n) {
     console.log(`  ATL picker: ${pickerOptions.length} options (write path usable, no report written)`)
     await page.locator('[aria-label="Close"]').click()
     await page.waitForSelector('[data-testid="checkpoint-picker"]', { state: 'detached', timeout: 15_000 })
+    if (REQUIRE_DEPLOYED_CONTRACT) await verifyReportSheetLifecycle(page)
 
     // TIR-377 Task 7 acceptance: a shared airport link must open that
     // airport, not the dashboard shell. The plural /airports/:code form is
