@@ -105,7 +105,7 @@ export function AirportSelector({
                     key={a.code}
                     type="button"
                     onClick={() => select(a)}
-                    className="flex w-full items-center px-3 py-2 text-sm hover:bg-brand-50/50 rounded"
+                    className="flex w-full items-center px-3 py-2 text-sm min-h-[44px] hover:bg-brand-50/50 rounded"
                   >
                     <span className="font-semibold text-brand-700">{a.code}</span>
                     <span className="ml-2 text-gray-600 dark:text-gray-300">{a.name}</span>

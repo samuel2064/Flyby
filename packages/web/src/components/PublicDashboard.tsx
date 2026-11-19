@@ -100,7 +100,7 @@ export function PublicDashboard({ onSelectAirport }: PublicDashboardProps) {
           <button
             type="button"
             onClick={() => void load()}
-            className="mt-4 inline-flex h-10 items-center justify-center rounded-xl border border-brand-500 bg-white px-4 text-sm font-semibold text-brand-700 transition hover:bg-brand-50 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+            className="mt-4 inline-flex min-h-[44px] items-center justify-center rounded-xl border border-brand-500 bg-white px-4 text-sm font-semibold text-brand-700 transition hover:bg-brand-50 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
           >
             Retry
           </button>

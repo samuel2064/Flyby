@@ -75,7 +75,7 @@ export default function NotifyToggle({ airportId, airportCode }: NotifyTogglePro
   if (!isSupported) {
     return (
       <span
-        className="text-xs text-gray-400 px-2 py-1 rounded border border-gray-200"
+        className="text-xs text-gray-400 px-3 py-2 rounded border border-gray-200 min-h-[44px] inline-flex items-center"
         title="Push notifications are not supported in this browser"
         aria-label={`Notifications not supported for ${airportCode}`}
       >
@@ -96,7 +96,7 @@ export default function NotifyToggle({ airportId, airportCode }: NotifyTogglePro
         aria-checked={enabled}
         disabled={loading}
         onClick={handleToggle}
-        className={`text-xs px-3 py-1 rounded border transition font-semibold ${tone} ${loading ? "opacity-60 cursor-wait" : ""}`}
+        className={`text-xs px-3 py-2 rounded border transition font-semibold min-h-[44px] ${tone} ${loading ? "opacity-60 cursor-wait" : ""}`}
         aria-label={`Toggle notifications for ${airportCode}`}
         data-testid="notify-toggle"
       >

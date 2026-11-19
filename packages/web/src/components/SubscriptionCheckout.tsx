@@ -63,7 +63,7 @@ export function SubscriptionCheckout({
           <label htmlFor="checkout-card" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
             Card
           </label>
-          <div id="checkout-card" className="h-10 px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-md bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20">
+          <div id="checkout-card" className="min-h-[44px] px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-md bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20">
             {/* Stripe Elements would mount here */}
             <input
               type="text"

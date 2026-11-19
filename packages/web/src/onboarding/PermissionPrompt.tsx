@@ -2,14 +2,14 @@ import { useState, useEffect } from 'react'
 import type { PermissionPromptProps } from './types'
 
 const LOCATION_ILLUSTRATION = (
-  <svg aria-hidden="true" className="h-16 w-16 mx-auto text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+  <svg aria-hidden="true" className="h-16 w-16 mx-auto text-slate-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
     <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z" strokeLinecap="round" strokeLinejoin="round" />
     <circle cx="12" cy="10" r="3" strokeLinecap="round" strokeLinejoin="round" />
   </svg>
 )
 
 const NOTIFICATION_ILLUSTRATION = (
-  <svg aria-hidden="true" className="h-16 w-16 mx-auto text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+  <svg aria-hidden="true" className="h-16 w-16 mx-auto text-slate-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
     <path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9" strokeLinecap="round" strokeLinejoin="round" />
     <path d="M13.73 21a2 2 0 01-3.46 0" strokeLinecap="round" strokeLinejoin="round" />
   </svg>
@@ -48,7 +48,7 @@ export default function PermissionPrompt({
 
   return (
     <section className="flex flex-col items-center justify-center text-center space-y-6 w-full max-w-xl">
-      <div className={`h-16 w-16 mx-auto ${status === 'granted' ? 'text-green-500' : status === 'denied' ? 'text-slate-400' : 'text-slate-400'} transition-colors duration-300`}>
+      <div className={`h-16 w-16 mx-auto ${status === 'granted' ? 'text-green-500' : 'text-slate-500'} transition-colors duration-300`}>
         {illustration}
         {status === 'granted' && (
           <svg className="absolute -right-1 -bottom-1 h-5 w-5 text-green-500" viewBox="0 0 20 20" fill="currentColor">

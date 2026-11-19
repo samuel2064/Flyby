@@ -76,7 +76,7 @@ export function WaitTimeCard({
               <button
                 type="button"
                 onClick={onReportTime}
-                className="bg-brand-50/50 text-brand-700 hover:bg-brand-100 px-3 py-1 rounded hover:shadow-md transition"
+                className="bg-brand-50/50 text-brand-700 hover:bg-brand-100 px-3 py-2 rounded hover:shadow-md transition min-h-[44px] focus:outline-none focus:ring-2 focus:ring-brand-500/40"
               >
                 Report time
               </button>
@@ -85,7 +85,7 @@ export function WaitTimeCard({
               <button
                 type="button"
                 onClick={onViewDetails}
-                className="bg-brand-50/50 text-brand-700 hover:bg-brand-100 px-3 py-1 rounded hover:shadow-md transition"
+                className="bg-brand-50/50 text-brand-700 hover:bg-brand-100 px-3 py-2 rounded hover:shadow-md transition min-h-[44px] focus:outline-none focus:ring-2 focus:ring-brand-500/40"
               >
                 View details
               </button>

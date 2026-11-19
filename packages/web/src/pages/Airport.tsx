@@ -258,8 +258,9 @@ export default function Airport() {
                 <p className="text-xs text-gray-400">{cp.source || "unknown"}</p>
               </div>
               <button
+                type="button"
                 onClick={() => setSelectedCheckpoint({ id: cp.id, name: cp.name })}
-                className="text-sm bg-brand text-white px-3 py-1 rounded hover:bg-brandDark transition"
+                className="text-sm bg-brand text-white px-3 py-2 rounded hover:bg-brandDark transition min-h-[44px] focus:outline-none focus:ring-2 focus:ring-brand-500/40"
                 aria-label={`Report wait time for ${cp.name}`}
               >
                 Report

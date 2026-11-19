@@ -190,9 +190,8 @@ export function AirportSearch({
                 key={airport.id}
                 role="option"
                 aria-selected={index === selectedIndex}
-                onClick={() => handleResultClick(airport)}
                 onMouseEnter={() => setSelectedIndex(index)}
-                className={`px-4 py-2 cursor-pointer transition ${
+                className={`px-4 py-2 transition ${
                   index === selectedIndex ? "bg-brand/10" : "hover:bg-gray-50"
                 }`}
               >
@@ -202,7 +201,7 @@ export function AirportSearch({
                     e.preventDefault();
                     handleResultClick(airport);
                   }}
-                  className="flex items-center justify-between w-full"
+                  className="flex items-center justify-between w-full block"
                 >
                   <div>
                     <p className="font-semibold text-gray-900">

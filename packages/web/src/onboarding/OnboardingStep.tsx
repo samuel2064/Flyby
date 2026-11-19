@@ -24,8 +24,8 @@ export default function OnboardingStep({
           stroke="currentColor"
           strokeWidth="2"
         >
-          <circle cx="100" cy="100" r="80" className="text-slate-200 dark:text-slate-700" />
-          <path d="M100 30v140M30 100h140" className="text-slate-300 dark:text-slate-600" />
+          <circle cx="100" cy="100" r="80" className="text-slate-500 dark:text-slate-700" />
+          <path d="M100 30v140M30 100h140" className="text-slate-500 dark:text-slate-600" />
         </svg>
       </div>
       <h1

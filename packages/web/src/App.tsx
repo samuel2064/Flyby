@@ -46,10 +46,10 @@ function InstallPrompt() {
     <div className="bg-brand text-white px-4 py-2 flex items-center justify-between">
       <span>Install Flyby for offline access</span>
       <div className="space-x-2">
-        <button onClick={handleInstall} className="bg-white text-brand px-3 py-1 rounded text-sm font-semibold">
+        <button onClick={handleInstall} className="bg-white text-brand px-3 py-2 rounded text-sm font-semibold min-h-[44px] focus:outline-none focus:ring-2 focus:ring-brand-500/40">
           Install
         </button>
-        <button onClick={() => setVisible(false)} className="text-sm underline">
+        <button onClick={() => setVisible(false)} className="text-sm underline min-h-[44px] px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-500/40">
           Dismiss
         </button>
       </div>
