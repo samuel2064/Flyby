@@ -17,6 +17,17 @@ import {
 
 const AUTO_REFRESH_MS = 60_000
 
+function hasWait(minutes: number | null): minutes is number {
+  return minutes !== null && Number.isFinite(minutes)
+}
+
+function waitColorFor(minutes: number): string {
+  if (minutes < 15) return 'text-green-600'
+  if (minutes < 30) return 'text-yellow-600'
+  if (minutes < 45) return 'text-orange-600'
+  return 'text-red-600'
+}
+
 type FetchState = 'loading' | 'waking' | 'offline' | 'ready' | 'error'
 
 interface DashboardProps {
@@ -176,11 +187,18 @@ export function Dashboard({ onSelectAirport, onReportWaitTime }: DashboardProps)
             const age = formatAge(a.latestReportedAt)
             return (
               <li key={a.airport}>
-                <button
-                  type="button"
-                  onClick={() => onSelectAirport(a)}
+                <article
+                  role="button"
+                  tabIndex={0}
                   aria-label={`${a.airport}: ${spec.label}, latest wait ${formatMinutes(a.latestWaitMinutes)} reported ${age}${stale && a.latestReportedAt ? ' (stale)' : ''}, ${a.sampleSize} reports. View details.`}
-                  className="flex min-h-11 w-full items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:border-brand-500/50 hover:shadow focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+                  onClick={() => onSelectAirport(a)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault()
+                      onSelectAirport(a)
+                    }
+                  }}
+                  className="flex min-h-11 w-full items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:border-brand-500/50 hover:shadow focus:outline-none focus:ring-2 focus:ring-brand-500/40 cursor-pointer"
                 >
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
@@ -203,7 +221,15 @@ export function Dashboard({ onSelectAirport, onReportWaitTime }: DashboardProps)
                     <p className="mt-0.5 truncate text-xs text-slate-500">{a.airportName}</p>
                   </div>
                   <div className="shrink-0 text-right">
-                    <p className={`text-lg font-bold ${stale ? 'text-slate-400' : 'text-slate-900'}`}>
+                    <p
+                      className={`text-lg font-bold ${
+                        !hasWait(a.latestWaitMinutes)
+                          ? 'text-slate-500'
+                          : stale
+                            ? 'text-slate-500'
+                            : waitColorFor(a.latestWaitMinutes)
+                      }`}
+                    >
                       {formatMinutes(a.latestWaitMinutes)}
                     </p>
                     <p className={`text-xs ${stale ? 'font-medium text-slate-500' : 'text-slate-500'}`}>
@@ -224,7 +250,7 @@ export function Dashboard({ onSelectAirport, onReportWaitTime }: DashboardProps)
                   >
                     Report
                   </button>
-                </button>
+                </article>
               </li>
             )
           })}

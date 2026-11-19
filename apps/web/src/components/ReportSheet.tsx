@@ -217,7 +217,7 @@ export function ReportSheet({
                   disabled={options.length === 0}
                   className="mt-2 h-12 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-brand-500/40 disabled:bg-slate-100"
                 >
-                  {options.length === 0 && <option value="">No checkpoints configured</option>}
+                  {options.length === 0 && <option value="">Loading checkpoints…</option>}
                   {options.map((name) => (
                     <option key={name} value={name}>
                       {name}

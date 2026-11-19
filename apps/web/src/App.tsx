@@ -144,7 +144,7 @@ export default function App() {
                   }
                   setDetailAirport(null)
                 }}
-                className={`min-h-11 rounded-full px-3 text-xs font-semibold transition focus:outline-none focus:ring-2 focus:ring-white/40 sm:min-h-0 sm:px-4 ${
+                className={`min-h-11 rounded-full px-3 text-xs font-semibold transition focus:outline-none focus:ring-2 focus:ring-white/40 sm:px-4 ${
                   tab === value ? 'bg-white text-brand-900' : 'text-white/80 hover:text-white'
                 }`}
               >

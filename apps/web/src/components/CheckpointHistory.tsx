@@ -47,7 +47,7 @@ export function CheckpointHistory({ airportCode, checkpointName }: CheckpointHis
         type="button"
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
-        className="inline-flex h-10 items-center gap-1 rounded-lg text-sm font-semibold text-brand-700 transition hover:text-brand-800 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+        className="inline-flex h-11 items-center gap-1 rounded-lg text-sm font-semibold text-brand-700 transition hover:text-brand-800 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
       >
         <svg
           aria-hidden="true"
