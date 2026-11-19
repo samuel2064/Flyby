@@ -75,7 +75,7 @@ export default function NotifyToggle({ airportId, airportCode }: NotifyTogglePro
   if (!isSupported) {
     return (
       <span
-        className="text-xs text-gray-400 px-3 py-2 rounded border border-gray-200 min-h-[44px] inline-flex items-center"
+        className="text-xs text-gray-500 px-3 py-2 rounded border border-gray-200 min-h-[44px] inline-flex items-center"
         title="Push notifications are not supported in this browser"
         aria-label={`Notifications not supported for ${airportCode}`}
       >

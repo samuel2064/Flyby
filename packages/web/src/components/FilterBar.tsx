@@ -41,7 +41,7 @@ export function FilterBar({
                   onTerminalChange([...selectedTerminals, terminal])
                 }
               }}
-              className={`px-3 py-1.5 text-sm rounded-full transition-all focus:outline-none focus:ring-2 focus:ring-brand-500/20 ${
+              className={`min-h-[44px] px-3 py-1.5 text-sm rounded-full transition-all focus:outline-none focus:ring-2 focus:ring-brand-500/20 ${
                 isActive
                   ? 'bg-brand-600 text-white hover:bg-brand-700'
                   : 'bg-gray-100 dark:bg-slate-600 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-slate-500'

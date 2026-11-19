@@ -126,7 +126,7 @@ export default function AirportSelector({
                   <div>
                     <span className="font-semibold text-slate-900 dark:text-slate-100">{airport.code}</span>
                     <span className="ml-2 text-sm text-slate-600 dark:text-slate-300">{airport.name}</span>
-                    <p className="text-xs text-slate-400 dark:text-slate-500">{airport.city}</p>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">{airport.city}</p>
                   </div>
                   {isSelected && (
                     <svg className="w-5 h-5 text-brand-600" viewBox="0 0 20 20" fill="currentColor">

@@ -213,7 +213,7 @@ export function AirportSearch({
                     </p>
                     {showDistance &&
                       airport.distance !== undefined && (
-                        <p className="text-xs text-gray-400">
+                        <p className="text-xs text-gray-500">
                           {airport.distance.toFixed(1)} miles away
                         </p>
                       )}

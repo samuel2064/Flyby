@@ -234,7 +234,7 @@ export default function NotificationPreferences() {
             type="button"
             onClick={handleSave}
             disabled={!dirty || saving}
-            className="bg-brand text-white px-4 py-2 rounded-md disabled:opacity-50 disabled:cursor-not-allowed hover:bg-brand/90"
+            className="min-h-[44px] bg-brand text-white px-4 py-2 rounded-md disabled:opacity-50 disabled:cursor-not-allowed hover:bg-brand/90"
             aria-label="Save notification preferences"
           >
             {saving ? "Saving…" : "Save preferences"}
@@ -243,7 +243,7 @@ export default function NotificationPreferences() {
             <button
               type="button"
               onClick={() => setDraft(data)}
-              className="text-sm text-gray-600 hover:underline"
+              className="min-h-[44px] text-sm text-gray-600 hover:underline flex items-center justify-center"
             >
               Discard changes
             </button>

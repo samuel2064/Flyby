@@ -31,7 +31,7 @@ interface SseUpdate {
 }
 
 function getWaitColor(minutes: number | null) {
-  if (minutes === null) return 'text-gray-400';
+  if (minutes === null) return 'text-gray-500';
   if (minutes <= 15) return 'text-green-600';
   if (minutes <= 30) return 'text-yellow-600';
   return 'text-red-600';
@@ -236,7 +236,7 @@ export default function Home() {
               {/* Airport header */}
               <button
                 onClick={() => toggleExpanded(group.code)}
-                className="w-full flex items-center justify-between p-4 hover:bg-gray-50 transition"
+                className="w-full flex items-center justify-between p-4 hover:bg-gray-50 transition min-h-[44px]"
                 aria-expanded={isExpanded}
                 data-testid={`airport-header-${group.code}`}
               >
@@ -246,12 +246,12 @@ export default function Home() {
                   </span>
                   <div className="text-left">
                     <p className="font-semibold text-gray-900">{group.name}</p>
-                    <p className={group.avgWaitTime !== null ? 'text-sm text-gray-500' : 'text-sm text-gray-400'}>
+                    <p className={group.avgWaitTime !== null ? 'text-sm text-gray-500' : 'text-sm text-gray-500'}>
                       {group.avgWaitTime !== null ? `Avg wait: ${group.avgWaitTime} min` : 'No recent data'}
                     </p>
                   </div>
                 </div>
-                <span className={`text-lg text-gray-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`}>
+                <span className={`text-lg text-gray-500 transition-transform ${isExpanded ? 'rotate-180' : ''}`}>
                   ▼
                 </span>
               </button>
@@ -269,7 +269,7 @@ export default function Home() {
                           <p className={`text-2xl font-bold ${getWaitColor(cp.latestWaitTimeMinutes)}`}>
                             {cp.latestWaitTimeMinutes !== null ? `${cp.latestWaitTimeMinutes} min` : '—'}
                           </p>
-                          <p className="text-xs text-gray-400">
+                          <p className="text-xs text-gray-500">
                             {cp.source || 'unknown'}
                             {laneLabel(cp.reportType) && (
                               <span className={`ml-1 px-1.5 py-0.5 rounded font-medium ${laneBadgeClass(cp.reportType)}`} data-testid="lane-badge">

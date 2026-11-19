@@ -198,7 +198,7 @@ describe("Airport page", () => {
       const waitTimeDisplay = waitCard?.querySelector("div.text-right.p-2.rounded-lg");
       expect(waitTimeDisplay?.classList.contains("bg-gray-100")).toBe(true);
       const waitTime = waitTimeDisplay?.querySelector("p.text-2xl");
-      expect(waitTime?.classList.contains("text-gray-400")).toBe(true);
+      expect(waitTime?.classList.contains("text-gray-500")).toBe(true);
       expect(waitTime?.textContent).toBe("—");
     });
   });
@@ -209,7 +209,7 @@ describe("Airport page", () => {
 
     await waitFor(() => {
       const waitCard = screen.getByText("Terminal 2 Checkpoint B").closest("div.bg-white.rounded-lg.shadow");
-      const sourceText = waitCard?.querySelector("p.text-xs.text-gray-400");
+      const sourceText = waitCard?.querySelector("p.text-xs.text-gray-500");
       expect(sourceText?.textContent).toBe("unknown");
     });
   });

@@ -91,7 +91,7 @@ function BestTimeChip({ best, loading }: { best: ForecastBestHour | undefined; l
 }
 
 function getWaitColor(minutes: number | null) {
-  if (minutes === null) return "text-gray-400";
+  if (minutes === null) return "text-gray-500";
   if (minutes <= 15) return "text-green-600";
   if (minutes <= 30) return "text-yellow-600";
   return "text-red-600";
@@ -255,7 +255,7 @@ export default function Airport() {
                 <p className={`text-2xl font-bold ${getWaitColor(cp.latestWaitTimeMinutes)}`}>
                   {cp.latestWaitTimeMinutes !== null ? `${cp.latestWaitTimeMinutes} min` : "—"}
                 </p>
-                <p className="text-xs text-gray-400">{cp.source || "unknown"}</p>
+                <p className="text-xs text-gray-500">{cp.source || "unknown"}</p>
               </div>
               <button
                 type="button"

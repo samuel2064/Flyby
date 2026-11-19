@@ -87,7 +87,7 @@ interface SseUpdate {
 }
 
 function getWaitColor(minutes: number | null) {
-  if (minutes === null) return "text-gray-400";
+  if (minutes === null) return "text-gray-500";
   if (minutes <= 15) return "text-green-600";
   if (minutes <= 30) return "text-yellow-600";
   return "text-red-600";
@@ -101,7 +101,7 @@ function getWaitBg(minutes: number | null) {
 }
 
 function getCrowdingLevel(minutes: number | null): { label: string; color: string } {
-  if (minutes === null) return { label: "Unknown", color: "text-gray-400" };
+  if (minutes === null) return { label: "Unknown", color: "text-gray-500" };
   if (minutes <= 15) return { label: "Low", color: "text-green-600" };
   if (minutes <= 30) return { label: "Moderate", color: "text-yellow-600" };
   return { label: "High", color: "text-red-600" };
@@ -288,7 +288,7 @@ export default function Checkpoint() {
           )}
           <button
             onClick={() => setReporting(true)}
-            className="text-sm bg-brand text-white px-4 py-2 rounded-lg hover:bg-brandDark transition font-semibold"
+            className="text-sm bg-brand text-white px-4 py-2 rounded-lg hover:bg-brandDark transition font-semibold min-h-[44px]"
           >
             Report Time
           </button>
@@ -332,7 +332,7 @@ export default function Checkpoint() {
               <button
                 key={h}
                 onClick={() => setHistoryHours(h)}
-                className={`text-xs px-2 py-1 rounded ${
+                className={`min-h-[44px] min-w-[44px] text-xs px-2 py-1 rounded ${
                   historyHours === h
                     ? "bg-brand text-white"
                     : "bg-gray-100 text-gray-700 hover:bg-gray-200"
@@ -378,7 +378,7 @@ export default function Checkpoint() {
       <div className="bg-white rounded-lg shadow p-4">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-semibold">Forecast</h3>
-          <span className="text-xs text-gray-400">
+          <span className="text-xs text-gray-500">
             {predictData?.predictions?.some((p) => p.source === "blended")
               ? "Live-adjusted pattern forecast"
               : "Pattern-based prediction from recent reports"}
@@ -425,7 +425,7 @@ export default function Checkpoint() {
                       style={{ width: `${confidence}%` }}
                     />
                   </div>
-                  <p className="text-[10px] text-gray-400 mt-1">
+                  <p className="text-[10px] text-gray-500 mt-1">
                     {isBest ? "Best time" : `${confidence}% confidence`}
                   </p>
                 </div>

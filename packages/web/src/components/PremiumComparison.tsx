@@ -18,7 +18,7 @@ const TIER_HEADER_STYLES: Record<string, string> = {
 }
 
 const CHECKMARK_STYLES: Record<string, string> = {
-  'true': 'text-gray-400 dark:text-gray-500',
+  'true': 'text-gray-500 dark:text-gray-400',
   'false': 'text-brand-600 dark:text-brand-400',
 }
 
