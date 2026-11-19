@@ -114,6 +114,14 @@ export default function App() {
     setReportTarget({ airportCode, checkpoint })
   }, [])
 
+  const closeReportSheet = useCallback(() => {
+    setReportTarget(null)
+  }, [])
+
+  const handleReportSubmitted = useCallback(() => {
+    void loadSummaries()
+  }, [loadSummaries])
+
   return (
     <div className="min-h-screen bg-slate-50">
       <header className="bg-brand-900 text-white">
@@ -183,12 +191,8 @@ export default function App() {
         open={reportTarget !== null}
         airportCode={reportTarget?.airportCode ?? ''}
         checkpoint={reportTarget?.checkpoint}
-        onClose={() => setReportTarget(null)}
-        onReported={() => {
-          setReportTarget(null)
-          // Refresh dashboard data after a report
-          void loadSummaries()
-        }}
+        onClose={closeReportSheet}
+        onReported={handleReportSubmitted}
       />
 
       <InstallPrompt suppressed={reportTarget !== null} />
