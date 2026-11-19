@@ -4,7 +4,7 @@
 - [x] Airport search page
 - [x] Airport detail page with checkpoints
 - [x] Airport stats drill page (`/airport/:code`, TIR-363, routed): Avg/Median/P90 strip, busiest-hours and day-of-week CSS bar charts, live wait-stats feed with 60s refresh + staleness badge, error state with Retry control, per-checkpoint drill-in links to `/checkpoint/:id` with latest wait ("No reports yet" on empty data; section hidden on fetch failure or empty checkpoint list — no fabrication)
-- [x] Home page with all checkpoints and latest wait times � NOTE: implemented in `pages/Home.tsx` with unit coverage, but currently UNROUTED: `/` is served by `components/PublicDashboard.tsx` (TIR-363 stats-first surface); legacy pending a product decision (re-wire or delete)
+- [x] Home page with all checkpoints and latest wait times — NOTE: implemented in `pages/Home.tsx` with unit coverage, but currently UNROUTED: `/` is served by `components/PublicDashboard.tsx` (TIR-363 stats-first surface); legacy pending a product decision (re-wire or delete)
 - [x] PWA: service worker, manifest, install prompt
 - [x] Tailwind CSS styling
 - [x] React Router navigation
@@ -15,7 +15,7 @@
 - [x] Skeleton loading states (all pages)
 - [x] Rate limit feedback with countdown timer
 - [x] Checkpoint page Forecast section (hourly pattern-based predictions with confidence bars, best-time highlight, and "Live-adjusted" badge on live-blended hours)
-- [x] Airport page per-checkpoint "best time today" chips (single batched forecast call, refetch on SSE updates, loading skeleton, no fabrication on empty data, chip hidden on fetch error) � NOTE: implemented in `pages/Airport.tsx` with full unit coverage, but currently UNROUTED: since the TIR-363 port `/airport/:code` serves the stats-drill page (`components/AirportDetail.tsx`) instead; chips UI is legacy pending a product decision (re-wire or delete)
+- [x] Airport page per-checkpoint "best time today" chips (single batched forecast call, refetch on SSE updates, loading skeleton, no fabrication on empty data, chip hidden on fetch error) — NOTE: implemented in `pages/Airport.tsx` with full unit coverage, but currently UNROUTED: since the TIR-363 port `/airport/:code` serves the stats-drill page (`components/AirportDetail.tsx`) instead; chips UI is legacy pending a product decision (re-wire or delete)
 - [x] useApi hook (reusable fetch wrapper with loading/error/abort)
 - [x] useDebounce hook (search input debounce)
 - [x] useApiMutation hook (POST/PUT/PATCH/DELETE with loading/error/success)
