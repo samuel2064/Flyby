@@ -72,11 +72,11 @@ export default function Search() {
       </div>
 
       <div className="mb-6">
-        <button
-          onClick={requestLocation}
-          disabled={geoLoading || !navigator.geolocation}
-          className="w-full bg-gray-100 text-gray-700 font-semibold py-2 rounded-lg hover:bg-gray-200 transition disabled:opacity-50 flex items-center justify-center gap-2"
-        >
+          <button
+            onClick={requestLocation}
+            disabled={geoLoading || !navigator.geolocation}
+            className="w-full min-h-[44px] bg-gray-100 text-gray-700 font-semibold rounded-lg hover:bg-gray-200 transition disabled:opacity-50 flex items-center justify-center gap-2"
+          >
           {geoLoading ? "Locating..." : "📍 Find nearby airports"}
         </button>
         {geoError && <p className="text-red-600 text-sm mt-1">{geoError}</p>}

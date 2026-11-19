@@ -175,7 +175,7 @@ export function AirportSearch({
           aria-autocomplete="list"
           aria-controls="airport-search-results"
           aria-expanded={isOpen && filteredResults.length > 0}
-          className={`w-full rounded-lg border border-gray-300 px-4 py-2 focus:outline-none focus:ring-2 focus:ring-brand transition ${className}`}
+          className={`w-full min-h-[44px] rounded-lg border border-gray-300 px-4 py-2 focus:outline-none focus:ring-2 focus:ring-brand transition ${className}`}
         />
         {isOpen && filteredResults.length > 0 && (
           <ul

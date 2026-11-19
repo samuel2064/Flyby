@@ -100,22 +100,22 @@ function App() {
       <ReportSheetProvider>
         <header className="bg-brand text-white p-4 shadow-md">
         <div className="max-w-3xl mx-auto flex items-center justify-between">
-          <Link to="/" className="text-xl font-bold tracking-tight">
+          <Link to="/" className="text-xl font-bold tracking-tight min-h-11 inline-flex items-center px-2">
             Flyby
           </Link>
           <nav className="space-x-4 text-sm flex items-center">
-            <Link to="/" className="hover:underline">Home</Link>
-            <Link to="/search" className="hover:underline">Search</Link>
+            <Link to="/" className="hover:underline min-h-11 inline-flex items-center px-2">Home</Link>
+            <Link to="/search" className="hover:underline min-h-11 inline-flex items-center px-2">Search</Link>
             {user ? (
               <>
-                <Link to="/dashboard" className="hover:underline">Dashboard</Link>
-                <Link to="/profile" className="hover:underline">Profile</Link>
-                <button onClick={logout} className="hover:underline">Log out</button>
+                <Link to="/dashboard" className="hover:underline min-h-11 inline-flex items-center px-2">Dashboard</Link>
+                <Link to="/profile" className="hover:underline min-h-11 inline-flex items-center px-2">Profile</Link>
+                <button onClick={logout} className="hover:underline min-h-11 inline-flex items-center px-2">Log out</button>
               </>
             ) : (
               <>
-                <Link to="/login" className="hover:underline">Log in</Link>
-                <Link to="/signup" className="hover:underline">Sign up</Link>
+                <Link to="/login" className="hover:underline min-h-11 inline-flex items-center px-2">Log in</Link>
+                <Link to="/signup" className="hover:underline min-h-11 inline-flex items-center px-2">Sign up</Link>
               </>
             )}
           </nav>

@@ -210,14 +210,14 @@ export default function Home() {
 
       {/* Search */}
       <div className="mb-4">
-        <input
-          type="text"
-          placeholder="Search airport or checkpoint…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="w-full px-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand focus:border-transparent"
-          data-testid="home-search"
-        />
+          <input
+            type="text"
+            placeholder="Search airport or checkpoint…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="w-full min-h-[44px] px-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand focus:border-transparent"
+            data-testid="home-search"
+          />
       </div>
 
       {/* Results */}
