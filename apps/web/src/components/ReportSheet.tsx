@@ -3,6 +3,10 @@ import { submitWaitTimeReport } from '../api/waitTimes'
 import { checkpointOptions } from '../data/airports'
 import { canSubmitReport, effectiveCheckpointPick } from '../lib/reportCheckpoint'
 import {
+  freshReportSheetFormState,
+  shouldResetReportSheetForm,
+} from '../lib/reportSheetForm'
+import {
   MAX_CUSTOM_MINUTES,
   MIN_CUSTOM_MINUTES,
   resolveCustomMinutes,
@@ -58,6 +62,22 @@ export function ReportSheet({
   // stays disabled while it ticks down (mirrors the monorepo design).
   const [rateLimitUntil, setRateLimitUntil] = useState<number | null>(null)
   const [nowTick, setNowTick] = useState(() => Date.now())
+  const [prevOpen, setPrevOpen] = useState(open)
+
+  if (open !== prevOpen) {
+    setPrevOpen(open)
+    if (shouldResetReportSheetForm(open, prevOpen)) {
+      const fresh = freshReportSheetFormState()
+      setPickedCheckpoint(fresh.pickedCheckpoint)
+      setMinutes(fresh.minutes)
+      setCustomMinutes(fresh.customMinutes)
+      setCustomError(fresh.customError)
+      setSubmitting(fresh.submitting)
+      setSubmitted(fresh.submitted)
+      setError(fresh.error)
+      setRateLimitUntil(fresh.rateLimitUntil)
+    }
+  }
 
   useEffect(() => {
     if (rateLimitUntil === null) return
