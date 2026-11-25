@@ -6,6 +6,7 @@ import { errorTotal } from "./metrics";
 import { publishWaitTime, subscribeCheckpoint } from "./redis";
 import { canonicalAirportCompare } from "./airportCanonicalOrder";
 import { validateReportType } from "./validation";
+import { invalidateWaitStatsCaches } from "./waitStatsRoutes";
 
 // Deploy-compat surface (TIR-339 / M1): the endpoints the live traveler web
 // and QA probes call verbatim, served by the monorepo. Contract is the deploy
@@ -1030,7 +1031,7 @@ export const compatModerationQueue = async (req: Request, res: Response) => {
       },
     });
     res.json(
-      rows.map((r) => ({
+      rows.map((r: typeof rows[0]) => ({
         id: r.id,
         airport: r.checkpoint.airport.code,
         checkpoint: r.checkpoint.name,
@@ -1039,7 +1040,7 @@ export const compatModerationQueue = async (req: Request, res: Response) => {
         reportedAt: r.reportedAt.toISOString(),
         flagCount: r.flagCount,
         moderationStatus: r.flagCount >= 3 ? "hidden" : r.flagCount > 0 ? "flagged" : "none",
-        flags: r.flags.map((f) => ({
+        flags: r.flags.map((f: typeof r.flags[0]) => ({
           id: f.id,
           reason: f.reason,
           note: f.note ?? null,
@@ -1068,6 +1069,7 @@ export const compatModerationAction = async (req: Request, res: Response, newSta
     }
     if (newStatus === "hidden") {
       await prisma.waitTime.update({ where: { id }, data: { flagCount: 3 } });
+      invalidateWaitStatsCaches();
     } else {
       await prisma.$transaction([
         prisma.reportFlag.deleteMany({ where: { reportId: id } }),
