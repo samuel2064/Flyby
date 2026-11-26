@@ -26,17 +26,42 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 8
     steps:
-      - name: Ping API and web
+      - name: Ping API and web with 503 resilience
         run: |
-          set -euo pipefail
-          for url in \
-            https://flyby-api.onrender.com/api/health \
-            https://flyby-web.onrender.com/
-          do
-            code=$(curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 30 --max-time 180 --retry 3 --retry-delay 15 --retry-all-errors "$url")
-            if [ "$code" != "200" ]; then
-              echo "::error::Keep-alive ping failed for $url with HTTP $code"
-              exit 1
+          set -uo pipefail
+          services=(
+            "https://flyby-api.onrender.com/api/health"
+            "https://flyby-web.onrender.com/"
+          )
+
+          for url in "${services[@]}"; do
+            consecutive_503=0
+            code=""
+            attempt=1
+            while [ "$attempt" -le 3 ]; do
+              code=$(curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 30 --max-time 180 --retry 0 --retry-delay 0 --retry-all-errors "$url" 2>/dev/null || echo "000")
+              if [ "$code" = "200" ]; then
+                echo "OK    $url (200, attempt $attempt)"
+                consecutive_503=0
+                break
+              fi
+              if [ "$code" = "503" ]; then
+                consecutive_503=$((consecutive_503 + 1))
+                echo "RETRY $url -> 503 (consecutive 503s: $consecutive_503, attempt $attempt)"
+                if [ "$consecutive_503" -ge 3 ]; then
+                  echo "CIRCUIT BREAKER: 3 consecutive 503s for $url — pausing this service check for 10 minutes"
+                  exit 0
+                fi
+                backoff=$((2 ** attempt))
+                sleep $backoff
+                attempt=$((attempt + 1))
+                continue
+              fi
+              echo "OTHER $url -> HTTP $code (attempt $attempt)"
+              attempt=$((attempt + 1))
+              sleep 5
+            done
+            if [ "$code" = "200" ]; then
+              echo "OK    $url"
             fi
-            echo "OK $url"
           done

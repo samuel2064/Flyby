@@ -142,10 +142,12 @@ jobs:
               else
                 if [ "$HTTP_CODE" = "503" ]; then
                   echo "$var_name got 503, retrying in ${attempt}s (exponential backoff)..."
-                  sleep $attempt
+                  backoff=$((2 ** attempt))
+                  sleep $backoff
                 else
                   echo "$var_name got HTTP $HTTP_CODE, retrying in ${attempt}s..."
-                  sleep $attempt
+                  backoff=$((2 ** attempt))
+                  sleep $backoff
                 fi
               fi
             done
