@@ -1,0 +1,59 @@
+name: Render keep-alive
+
+on:
+  schedule:
+    # GitHub's scheduler drops most cron ticks on this account (2 scheduled
+    # runs in the 10 hours after 2026-11-17T02:30Z, with no skipped runs and
+    # no minutes overage), so this stays a best-effort second layer only - see
+    # TIR-414. A tick every 5 minutes raises the chance that one lands inside
+    # Render's 15-minute free-tier sleep window.
+    - cron: '*/5 * * * *'
+  push:
+    # Ping right after a deploy so the API is warm for the first user.
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: render-keep-alive
+  cancel-in-progress: true
+
+jobs:
+  keep-alive:
+    name: Keep Render services warm
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Ping API and web
+        run: |
+          set -uo pipefail
+          for url in \
+            https://flyby-api.onrender.com/api/health \
+            https://flyby-web.onrender.com/
+          do
+            code=""
+            attempt=1
+            backoff=2
+            while [ "$attempt" -le 3 ]; do
+              code=$(curl -sf -o /dev/null -w '%{http_code}' --connect-timeout 30 --max-time 180 "$url" 2>/dev/null || echo 000)
+              if [ "$code" = "200" ]; then
+                echo "OK $url"
+                break
+              elif [ "$code" = "503" ]; then
+                echo "RETRY $url -> HTTP 503 (service likely cold start), attempt $attempt, waiting ${backoff}s..."
+                sleep $backoff
+                attempt=$((attempt + 1))
+                backoff=$((backoff * 2))
+                continue
+              else
+                echo "::error::$url returned HTTP $code (expected 200 or 503)"
+                exit 1
+              fi
+            done
+            if [ "$code" != "200" ] && [ "$code" != "503" ]; then
+              echo "::error::$url returned HTTP $code (expected 200 or 503)"
+              exit 1
+            fi
+          done

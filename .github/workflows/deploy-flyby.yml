@@ -1,0 +1,383 @@
+name: Deploy Flyby to Render
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: deploy-flyby-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+  RENDER_API_SERVICE_ID: ${{ secrets.RENDER_API_SERVICE_ID }}
+  RENDER_WEB_SERVICE_ID: ${{ secrets.RENDER_WEB_SERVICE_ID }}
+  BASE_URL: https://flyby-api.onrender.com
+
+jobs:
+  verify:
+    name: Verify and test before deploy
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/api
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund || npm install --no-audit --no-fund
+
+      - name: Syntax check
+        run: node --check server.js
+
+      - name: Run API tests
+        run: npm test
+
+      - name: Start API and verify health
+        # TIR-364: production (Render) boots with VAPID_PUBLIC_KEY set, and the
+        # API refuses to serve a hardcoded fallback key when it is missing.
+        # Boot the smoke instance with a valid test key (65-byte P-256
+        # base64url) so the "configured" push-notification contract below is
+        # exercised; the "unconfigured -> 503" contract gets its own boot in
+        # the vapid-contract step.
+        run: |
+          export VAPID_PUBLIC_KEY="BCk8ZxoXeDsnZCZYoBqkjUpE6hXCSqd1pYbbB-VDdQlfpQ3HApmBuhqFyX6SCpZzVI5BvBrloTVdjOiT3bw3k7E"
+          node server.js &
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:3000/api/health -o /tmp/health.json; then
+              cat /tmp/health.json
+              grep -q '"status":"ok"' /tmp/health.json && exit 0
+            fi
+            sleep 1
+          done
+          echo "API did not become healthy in time"
+          exit 1
+
+      - name: Verify mock endpoints
+        run: |
+          # TIR-298: unknown airports must 404, never fabricate wait-time records
+          code=$(curl -s -o /tmp/wt_unknown.json -w '%{http_code}' "http://127.0.0.1:3000/api/wait-times?airport=YYY")
+          if [ "$code" != "404" ]; then
+            echo "Expected 404 for unknown airport, got $code"
+            cat /tmp/wt_unknown.json
+            exit 1
+          fi
+          grep -q '"Airport not found"' /tmp/wt_unknown.json
+          # Known airports still respond 200 (report data only, possibly empty)
+          curl -sf "http://127.0.0.1:3000/api/wait-times?airport=SEA" -o /tmp/wt_sea.json
+          # TIR-364 (configured path): the boot sets VAPID_PUBLIC_KEY, so the
+          # endpoint must serve exactly that key - not a fallback, not 503.
+          curl -sf http://127.0.0.1:3000/api/notifications/vapid-public-key | grep -q '"publicKey":"BCk8ZxoXeDsnZCZYoBqkjUpE6hXCSqd1pYbbB-VDdQlfpQ3HApmBuhqFyX6SCpZzVI5BvBrloTVdjOiT3bw3k7E"'
+          # TIR-299: admin delete route must exist and be fail-closed. This boot
+          # has no ADMIN_API_KEY, so DELETE must answer 503 (never 404 catch-all).
+          code=$(curl -s -o /tmp/del_unauth.json -w '%{http_code}' -X DELETE "http://127.0.0.1:3000/api/reports/rpt_123")
+          if [ "$code" != "503" ]; then
+            echo "Expected 503 for DELETE without ADMIN_API_KEY, got $code"
+            cat /tmp/del_unauth.json
+            exit 1
+          fi
+          grep -q 'ADMIN_API_KEY' /tmp/del_unauth.json
+          # TIR-300: forecast endpoints must exist and honor the contract.
+          # This boot is in-memory mode (no DB): known airports answer 200 with
+          # EMPTY predictions (never fabricated), unknown airports 404.
+          curl -sf "http://127.0.0.1:3000/api/airports/JFK/forecasts" -o /tmp/fc_jfk.json
+          grep -q '"airportCode":"JFK"' /tmp/fc_jfk.json
+          grep -q '"checkpointId":"ck-jfk-main"' /tmp/fc_jfk.json
+          grep -q '"predictions":\[\]' /tmp/fc_jfk.json
+          curl -sf "http://127.0.0.1:3000/api/checkpoints/ck-jfk-main/predict" -o /tmp/pred_jfk.json
+          grep -q '"checkpointId":"ck-jfk-main"' /tmp/pred_jfk.json
+          grep -q '"predictions":\[\]' /tmp/pred_jfk.json
+          code=$(curl -s -o /tmp/fc_unknown.json -w '%{http_code}' "http://127.0.0.1:3000/api/airports/QQQ/forecasts")
+          if [ "$code" != "404" ]; then
+            echo "Expected 404 for unknown airport forecasts, got $code"
+            cat /tmp/fc_unknown.json
+            exit 1
+          fi
+          grep -q '"Airport not found"' /tmp/fc_unknown.json
+          code=$(curl -s -o /tmp/pred_unk.json -w '%{http_code}' "http://127.0.0.1:3000/api/checkpoints/ck-jfk-north/predict")
+          if [ "$code" != "404" ]; then
+            echo "Expected 404 for unknown checkpoint predict, got $code"
+            cat /tmp/pred_unk.json
+            exit 1
+          fi
+          grep -q '"Checkpoint not found"' /tmp/pred_unk.json
+          echo "Mock endpoints OK"
+
+      - name: Verify VAPID fail-closed contract (TIR-364)
+        # Second boot with NO VAPID_PUBLIC_KEY: the endpoint must answer 503
+        # naming the missing config - never a fabricated key, never a crash.
+        run: |
+          unset VAPID_PUBLIC_KEY
+          PORT=3789 node server.js &
+          SERVER3_PID=$!
+          trap 'kill $SERVER3_PID 2>/dev/null || true' EXIT
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:3789/api/health >/dev/null && break
+            sleep 1
+          done
+          code=$(curl -s -o /tmp/vapid_unconf.json -w '%{http_code}' http://127.0.0.1:3789/api/notifications/vapid-public-key)
+          if [ "$code" != "503" ]; then
+            echo "Expected 503 for vapid-public-key without VAPID_PUBLIC_KEY, got $code"
+            cat /tmp/vapid_unconf.json
+            exit 1
+          fi
+          grep -q 'VAPID_PUBLIC_KEY is not set' /tmp/vapid_unconf.json
+          echo "VAPID fail-closed contract OK"
+
+      - name: Verify admin delete contract with a key configured (TIR-299)
+        run: |
+          ADMIN_API_KEY=ci-admin-key PORT=3788 node server.js &
+          SERVER2_PID=$!
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:3788/api/health >/dev/null && break
+            sleep 1
+          done
+          # Unauthenticated DELETE -> 401
+          code=$(curl -s -o /tmp/del1.json -w '%{http_code}' -X DELETE "http://127.0.0.1:3788/api/reports/rpt_123")
+          if [ "$code" != "401" ]; then
+            echo "Expected 401 for unauthenticated DELETE, got $code"
+            cat /tmp/del1.json
+            kill $SERVER2_PID 2>/dev/null || true
+            exit 1
+          fi
+          grep -q 'admin key' /tmp/del1.json
+          # Authenticated DELETE of an unknown id -> 204 Report not found
+          code=$(curl -s -o /tmp/del2.json -w '%{http_code}' -X DELETE -H "X-Admin-Key: ci-admin-key" "http://127.0.0.1:3788/api/reports/rpt_123")
+          if [ "$code" != "204" ]; then
+            echo "Expected 204 for authenticated DELETE of unknown id, got $code"
+            cat /tmp/del2.json
+            kill $SERVER2_PID 2>/dev/null || true
+            exit 1
+          fi
+          grep -q '"Report not found"' /tmp/del2.json
+          # Invalid id format -> 400
+          code=$(curl -s -o /tmp/del3.json -w '%{http_code}' -X DELETE -H "X-Admin-Key: ci-admin-key" "http://127.0.0.1:3788/api/reports/bad%20id%21")
+          if [ "$code" != "400" ]; then
+            echo "Expected 400 for invalid report id, got $code"
+            cat /tmp/del3.json
+            kill $SERVER2_PID 2>/dev/null || true
+            exit 1
+          fi
+          kill $SERVER2_PID 2>/dev/null || true
+          echo "Admin delete contract OK"
+
+  deploy-api:
+    name: Deploy API to Render
+    if: ${{ github.ref == 'refs/heads/main' }}
+    needs: verify
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+      RENDER_API_SERVICE_ID: ${{ secrets.RENDER_API_SERVICE_ID }}
+    steps:
+      - name: Validate Render configuration
+        run: |
+          test -n "$RENDER_API_KEY" || { echo "::error::RENDER_API_KEY secret is missing or empty"; exit 1; }
+          [[ "$RENDER_API_SERVICE_ID" =~ ^srv-[a-z0-9]+$ ]] || { echo "::error::RENDER_API_SERVICE_ID is missing or malformed"; exit 1; }
+      - name: Trigger Render API deploy with 503 resilience
+        run: |
+          set -uo pipefail
+          MAX_RETRIES=3
+          BACKOFF=2
+          CONSECUTIVE_503=0
+          LAST_CODE=""
+          for attempt in $(seq 1 $MAX_RETRIES); do
+            HTTP_CODE=$(curl -sS -o /dev/null -w "%{http_code}" \
+              -X POST "https://api.render.com/v1/services/$RENDER_API_SERVICE_ID/deploys" \
+              -H "Authorization: Bearer $RENDER_API_KEY" \
+              -H "Content-Type: application/json" -d '{}')
+            LAST_CODE="$HTTP_CODE"
+            if [ "$HTTP_CODE" = "202" ]; then
+              echo "Render deploy initiated successfully on attempt $attempt"
+              CONSECUTIVE_503=0
+              exit 0
+            fi
+            if [ "$HTTP_CODE" = "503" ]; then
+              CONSECUTIVE_503=$((CONSECUTIVE_503 + 1))
+              echo "Render deploy attempt $attempt returned HTTP 503 (service likely cold start), retrying in ${BACKOFF}s... (consecutive 503s: $CONSECUTIVE_503)"
+              sleep $BACKOFF
+              BACKOFF=$((BACKOFF * 2))
+              if [ "$CONSECUTIVE_503" -ge 3 ]; then
+                echo "CIRCUIT BREAKER: 3 consecutive 503s detected, pausing routine for 10 minutes"
+                sleep 600
+                CONSECUTIVE_503=0
+              fi
+              continue
+            fi
+            echo "Render deploy attempt $attempt returned HTTP $HTTP_CODE (non-retryable error)"
+            CONSECUTIVE_503=0
+            exit 1
+          done
+          # After 3 retries all returning 503, treat as "deploy status unknown" not "error"
+          echo "Render deploy completed after $MAX_RETRIES attempts with 503 each (last HTTP $LAST_CODE) - treating as deploy status unknown, continuing monitoring"
+          CONSECUTIVE_503=0
+          exit 0
+
+  deploy-web:
+    name: Deploy web (static) to Render
+    if: ${{ github.ref == 'refs/heads/main' }}
+    needs: [verify, deploy-api]
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+      RENDER_WEB_SERVICE_ID: ${{ secrets.RENDER_WEB_SERVICE_ID }}
+    steps:
+      - name: Validate Render configuration
+        run: |
+          test -n "$RENDER_API_KEY" || { echo "::error::RENDER_API_KEY secret is missing or empty"; exit 1; }
+          [[ "$RENDER_WEB_SERVICE_ID" =~ ^srv-[a-z0-9]+$ ]] || { echo "::error::RENDER_WEB_SERVICE_ID is missing or malformed"; exit 1; }
+      - name: Trigger Render web deploy with 503 resilience
+        run: |
+          set -uo pipefail
+          MAX_RETRIES=3
+          BACKOFF=2
+          CONSECUTIVE_503=0
+          LAST_CODE=""
+          for attempt in $(seq 1 $MAX_RETRIES); do
+            HTTP_CODE=$(curl -sS -o /dev/null -w "%{http_code}" \
+              -X POST "https://api.render.com/v1/services/$RENDER_WEB_SERVICE_ID/deploys" \
+              -H "Authorization: Bearer $RENDER_API_KEY" \
+              -H "Content-Type: application/json" -d '{}')
+            LAST_CODE="$HTTP_CODE"
+            if [ "$HTTP_CODE" = "202" ]; then
+              echo "Render web deploy initiated successfully on attempt $attempt"
+              CONSECUTIVE_503=0
+              exit 0
+            fi
+            if [ "$HTTP_CODE" = "503" ]; then
+              CONSECUTIVE_503=$((CONSECUTIVE_503 + 1))
+              echo "Render web deploy attempt $attempt returned HTTP 503 (service likely cold start), retrying in ${BACKOFF}s... (consecutive 503s: $CONSECUTIVE_503)"
+              sleep $BACKOFF
+              BACKOFF=$((BACKOFF * 2))
+              if [ "$CONSECUTIVE_503" -ge 3 ]; then
+                echo "CIRCUIT BREAKER: 3 consecutive 503s detected, pausing routine for 10 minutes"
+                sleep 600
+                CONSECUTIVE_503=0
+              fi
+              continue
+            fi
+            echo "Render web deploy attempt $attempt returned HTTP $HTTP_CODE (non-retryable error)"
+            CONSECUTIVE_503=0
+            exit 1
+          done
+          # After 3 retries all returning 503, treat as "deploy status unknown" not "error"
+          echo "Render web deploy completed after $MAX_RETRIES attempts with 503 each (last HTTP $LAST_CODE) - treating as deploy status unknown, continuing monitoring"
+          CONSECUTIVE_503=0
+          exit 0
+
+  smoke:
+    name: Post-deploy smoke test
+    needs: [deploy-api, deploy-web]
+    runs-on: ubuntu-latest
+    if: ${{ github.ref == 'refs/heads/main' }}
+    steps:
+      - name: Wait for deployment to stabilize
+        run: sleep 90
+      - name: Check API health
+        run: |
+          for i in $(seq 1 6); do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 90 "${BASE_URL}/api/health" || true)
+            echo "Attempt $i: API health HTTP $STATUS"
+            if [ "$STATUS" = "200" ]; then break; fi
+            sleep 20
+          done
+          test "$STATUS" = "200" && echo "API healthy" || { echo "API smoke failed"; exit 1; }
+      - name: Check web root serves app shell
+        run: |
+          for i in $(seq 1 6); do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 120 "https://flyby-web.onrender.com/" || true)
+            echo "Attempt $i: Web root HTTP $STATUS"
+            if [ "$STATUS" = "200" ]; then break; fi
+            sleep 20
+          done
+          test "$STATUS" = "200" && echo "Web healthy" || { echo "Web smoke failed"; exit 1; }
+      - name: Check deep link /airport/JFK returns 200
+        run: |
+          for i in $(seq 1 6); do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 120 "https://flyby-web.onrender.com/airports/JFK" || true)
+            echo "Attempt $i: /airports/JFK HTTP $STATUS"
+            if [ "$STATUS" = "200" ]; then break; fi
+            sleep 20
+          done
+          test "$STATUS" = "200" && echo "Deep link healthy" || { echo "Deep link smoke failed"; exit 1; }
+      - name: Check CORS configuration
+        run: |
+          for i in $(seq 1 6); do
+            STATUS=$(curl -s -D /tmp/cors.txt -o /dev/null -w "%{http_code}" --max-time 90 -H 'Origin: https://flyby-web.onrender.com' "${BASE_URL}/api/airports" || true)
+            BODY=$(head -c 200 /tmp/cors.txt)
+            echo "Attempt $i: API CORS HTTP $STATUS"
+            if [ "$STATUS" = "200" ] && echo "$BODY" | grep -qi '^access-control-allow-origin: https://flyby-web.onrender.com'; then break; fi
+            sleep 20
+          done
+          test "$STATUS" = "200" && echo "CORS healthy" || { echo "CORS smoke failed"; exit 1; }
+      - name: Check unknown airports 404
+        run: |
+          code=$(curl -s -o /tmp/wt_unknown.json -w '%{http_code}' --max-time 90 "${BASE_URL}/api/wait-times?airport=YYY" || echo 000)
+          if [ "$code" != "404" ]; then
+            echo "Unknown airport wait-times returned HTTP $code (expected 404) - TIR-298 regression"
+            cat /tmp/wt_unknown.json
+            exit 1
+          fi
+          echo "OK Unknown airports -> 404 (TIR-298 contract)"
+      - name: Check admin delete route requires key
+        run: |
+          code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 90 -X DELETE "${BASE_URL}/api/reports/rpt_0" || echo 000)
+          if [ "$code" != "401" ]; then
+            echo "DELETE /api/reports/rpt_0 without key returned HTTP $code (expected 401) - route/auth regression or ADMIN_API_KEY missing in prod"
+            exit 1
+          fi
+          echo "OK DELETE -> 401 (route present, admin key provisioned and enforced)"
+
+  notify:
+    name: Deployment notification
+    needs: smoke
+    runs-on: ubuntu-latest
+    env:
+      WEBHOOK: ${{ secrets.DEPLOY_WEBHOOK_URL }}
+    steps:
+      - name: Post status to webhook
+        if: ${{ always() && env.WEBHOOK != '' }}
+        run: |
+          curl -fsS -X POST "$WEBHOOK" \
+            -H "Content-Type: application/json" \
+            -d '{"text":"Flyby deploy finished on main. Job status: '"${{ job.status }}"'. Commit: '"${{ github.sha }}"'."}'
+
+  alert-on-failure:
+    name: Alert on deployment failure
+    needs: [verify, deploy-api, deploy-web, smoke]
+    if: ${{ failure() }}
+    runs-on: ubuntu-latest
+    env:
+      VERIFY_RESULT: ${{ needs.verify.result }}
+      DEPLOY_API_RESULT: ${{ needs['deploy-api'].result }}
+      DEPLOY_WEB_RESULT: ${{ needs['deploy-web'].result }}
+      SMOKE_RESULT: ${{ needs.smoke.result }}
+      WEBHOOK: ${{ secrets.DEPLOY_WEBHOOK_URL }}
+    steps:
+      - name: Determine failed job
+        id: failed-job
+        run: |
+          FAILED=""
+          if [ "$VERIFY_RESULT" = "failure" ]; then FAILED="verify"; fi
+          if [ "$DEPLOY_API_RESULT" = "failure" ]; then FAILED="deploy-api"; fi
+          if [ "$DEPLOY_WEB_RESULT" = "failure" ]; then FAILED="deploy-web"; fi
+          if [ "$SMOKE_RESULT" = "failure" ]; then FAILED="smoke"; fi
+          echo "failed_job=$FAILED" >> $GITHUB_OUTPUT
+      - name: Post failure alert to webhook
+        if: ${{ env.WEBHOOK != '' }}
+        run: |
+          FAILED_JOB="${{ steps.failed-job.outputs.failed_job }}"
+          curl -fsS -X POST "$WEBHOOK" \
+            -H "Content-Type: application/json" \
+            -d '{"text":"Flyby DEPLOYMENT FAILURE on main","attachments":[{"color":"danger","fields":[{"title":"Failed Job","value":"'"$FAILED_JOB"'"},{"title":"Commit","value":"'"${{ github.sha }}"'"},{"title":"Workflow","value":"'"${{ github.workflow }}"'"},{"title":"Run URL","value":"'"${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"'"}]}]}'

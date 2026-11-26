@@ -1,0 +1,19 @@
+{
+  "name": "_default",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@playwright/test": "^1.65.1",
+    "axios": "^1.21.1",
+    "playwright": "^1.65.1",
+    "playwright-core": "^1.65.1"
+  }
+}
