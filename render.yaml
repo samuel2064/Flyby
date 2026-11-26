@@ -73,10 +73,66 @@ services:
       - key: ADMIN_API_KEY
         generateValue: true
 
+  # TIR-339 Option A: Monorepo staging services (branch: monorepo-candidate)
+  # These are provisional staging services; data is isolated from production.
+  - type: web
+    name: flyby-web-staging
+    runtime: static
+    branch: monorepo-candidate
+    rootDir: apps/web
+    autoDeployTrigger: commit
+    buildCommand: npm ci && npm run build
+    staticPublishPath: dist
+    envVars:
+      - key: VITE_API_BASE_URL
+        value: https://flyby-api-staging.onrender.com
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+
+  - type: web
+    name: flyby-api-staging
+    runtime: node
+    plan: free
+    region: oregon
+    branch: monorepo-candidate
+    rootDir: apps/api
+    autoDeployTrigger: commit
+    buildCommand: npm ci --omit=dev && npx prisma generate
+    startCommand: npx prisma migrate deploy --schema prisma/deploy/schema.postgres.prisma && npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: staging
+      - key: PORT
+        value: 10000
+      - key: CORS_ORIGINS
+        value: https://flyby-web-staging.onrender.com
+      - key: VAPID_PUBLIC_KEY
+        sync: false
+      - key: DATABASE_URL
+        value: postgresql://flyby:flyby@db-staging:5432/flyby_staging
+      - key: JWT_SECRET
+        generateValue: true
+      # Guards the moderation review queue + hide/clear endpoints and the
+      # admin DELETE /api/reports/:id path (TIR-325). Render auto-generates
+      # the secret; the raw value never appears in the repo.
+      - key: ADMIN_API_KEY
+        generateValue: true
+
 databases:
   - name: flyby-db
     databaseName: flyby
     user: flyby
+    plan: free
+    postgresMajorVersion: "16"
+    ipAllowList: []
+
+  # TIR-339 Option A: Staging PostgreSQL (isolated from production)
+  - name: flyby-db-staging
+    databaseName: flyby_staging
+    user: flyby_staging
     plan: free
     postgresMajorVersion: "16"
     ipAllowList: []
