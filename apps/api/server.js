@@ -51,6 +51,15 @@ app.get('/api/health', (req, res) => {
   });
 });
 
+// Root health endpoint (TIR-521): allows GET /health to return 200
+app.get('/health', (req, res) => {
+  res.status(200).json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    service: 'flyby-api'
+  });
+});
+
 // Basic root endpoint
 app.get('/', (req, res) => {
   res.json({
