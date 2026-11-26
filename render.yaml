@@ -112,7 +112,9 @@ services:
       - key: VAPID_PUBLIC_KEY
         sync: false
       - key: DATABASE_URL
-        value: postgresql://flyby:flyby@db-staging:5432/flyby_staging
+        fromDatabase:
+          name: flyby-db-staging
+          property: connectionString
       - key: JWT_SECRET
         generateValue: true
       # Guards the moderation review queue + hide/clear endpoints and the
